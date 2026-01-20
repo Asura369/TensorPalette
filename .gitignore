@@ -1,0 +1,27 @@
+# General
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.DS_Store
+.env
+venv/
+.venv/
+env/
+
+# Data (Ignore huge datasets)
+training_content/
+training_content.zip
+val2017.zip
+
+# Models
+models/vgg16.pth
+
+# Styles
+styles/*
+!styles/oil.jpg
+
+# IDEs
+.idea/
+.vscode/
+*.swp
