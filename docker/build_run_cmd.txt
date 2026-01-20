@@ -1,0 +1,5 @@
+# Build the container
+docker build -f docker/Dockerfile -t tensorpalette .
+
+# Run the container
+docker run -p 8501:8501 tensorpalette
