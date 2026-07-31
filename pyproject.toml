@@ -6,10 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "styleforge"
 version = "2.0.0"
 description = "Fast Neural Style Transfer Engine"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 dependencies = [
-    "torch>=2.1.0",
-    "torchvision>=0.16.0",
+    "torch>=2.3.0",
+    "torchvision>=0.18.0",
     "numpy>=1.24.0",
     "Pillow>=10.0.0",
     "matplotlib>=3.7.0",
@@ -35,13 +35,13 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

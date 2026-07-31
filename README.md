@@ -77,7 +77,7 @@ All images are public domain. Source: WikiArt / respective museum collections.
 
 ### Prerequisites
 
-- **Python 3.9+** (tested on 3.9, 3.10, 3.11)
+- **Python 3.12+** (tested on 3.12)
 - **Node.js 18+** (for frontend development)
 - **Git** (for cloning)
 - **Docker** (optional, for containerized deployment)
@@ -141,7 +141,7 @@ pytest tests/ -v
 ruff check src/ tests/ app.py scripts/ server/
 ```
 
-All 24 tests should pass.
+All 22 tests should pass.
 
 ---
 

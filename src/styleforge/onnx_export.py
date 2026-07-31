@@ -14,7 +14,7 @@ def export_single_style(model_path: str, output_path: str, image_size: int = 256
     dummy = torch.randn(1, 3, image_size, image_size)
     torch.onnx.export(
         model,
-        dummy,
+        (dummy,),
         output_path,
         opset_version=17,
         input_names=["input"],
@@ -50,7 +50,7 @@ def export_cin_style(
     dummy = torch.randn(1, 3, image_size, image_size)
     torch.onnx.export(
         wrapped,
-        dummy,
+        (dummy,),
         output_path,
         opset_version=17,
         input_names=["input"],

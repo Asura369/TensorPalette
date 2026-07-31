@@ -12,7 +12,7 @@ class Vgg16(torch.nn.Module):
         vgg = models.vgg16(weights=None)
         if os.path.exists(vgg_path):
             print(f"[VGG16] Loading from local file: {vgg_path}")
-            vgg.load_state_dict(torch.load(vgg_path, map_location='cpu'))
+            vgg.load_state_dict(torch.load(vgg_path, map_location='cpu', weights_only=True))
         else:
             print("[VGG16] Local file not found, downloading pretrained weights...")
             vgg = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
