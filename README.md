@@ -71,6 +71,16 @@ graph LR
 
 All images are public domain. Source: WikiArt / respective museum collections.
 
+### Style Images
+
+The 5 curated style images are bundled in the `styles/` directory. All images are public domain from Wikimedia Commons:
+
+- [Starry Night](https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg) (Van Gogh, 1889)
+- [The Great Wave](https://commons.wikimedia.org/wiki/File:The_Great_Wave_off_Kanagawa.jpg) (Hokusai, 1831)
+- [Girl with a Pearl Earring](https://commons.wikimedia.org/wiki/File:1665_Girl_with_a_Pearl_Earring.jpg) (Vermeer, 1665)
+- [Composition VIII](https://commons.wikimedia.org/wiki/File:Wassily_Kandinsky_Composition_VIII.jpg) (Kandinsky, 1923)
+- [Water Lilies](https://commons.wikimedia.org/wiki/File:Claude_Monet_-_Water_Lilies_-_1933.1157_-_Art_Institute_of_Chicago.jpg) (Monet, 1906)
+
 ---
 
 ## Quick Start
@@ -190,14 +200,6 @@ npm run dev
 
 The frontend dev server proxies `/api` requests to `localhost:8000`.
 
-#### Streamlit UI (Legacy)
-
-```bash
-streamlit run app.py
-```
-
-Opens at `http://localhost:8501`. Note: This is for local development only. The production app uses FastAPI + React.
-
 #### Docker
 
 **Build the image:**
@@ -221,9 +223,19 @@ curl http://localhost:8000/api/health
 
 #### Using Google Colab (Recommended)
 
-1. Open [`StyleForge.ipynb`](StyleForge.ipynb) in [Google Colab](https://colab.research.google.com/)
-2. Upload `project.zip` (containing `src/`, `styles/`, `configs/`)
-3. Run all cells
+1. Create `project.zip` for Colab:
+   ```bash
+   python scripts/create_colab_zip.py
+   ```
+   This creates a ~2.5MB zip containing:
+   - `pyproject.toml` — package metadata
+   - `src/styleforge/` — Python package
+   - `styles/` — 5 style images + catalog
+   - `configs/` — training configuration
+   - `StyleForge.ipynb` — the notebook
+
+2. Open [`StyleForge.ipynb`](StyleForge.ipynb) in [Google Colab](https://colab.research.google.com/)
+3. Upload `project.zip` and run all cells
 4. Download `multistyle.pth` from the output
 5. Place it in `models/`
 

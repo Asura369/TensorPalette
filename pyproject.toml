@@ -8,26 +8,25 @@ version = "2.0.0"
 description = "Fast Neural Style Transfer Engine"
 requires-python = ">=3.12"
 dependencies = [
-    "torch>=2.3.0",
-    "torchvision>=0.18.0",
-    "numpy>=1.24.0",
-    "Pillow>=10.0.0",
-    "matplotlib>=3.7.0",
+    "torch>=2.13.0",
+    "torchvision>=0.28.0",
+    "numpy>=2.0.0",
+    "Pillow>=12.0.0",
+    "matplotlib>=3.11.0",
     "tqdm>=4.65.0",
-    "streamlit>=1.28.0",
     "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 server = [
-    "fastapi>=0.104.0",
+    "fastapi>=0.141.0",
     "uvicorn>=0.24.0",
     "python-multipart>=0.0.6",
 ]
 dev = [
-    "pytest>=7.4.0",
-    "ruff>=0.1.0",
-    "mypy>=1.5.0",
+    "pytest>=9.0.0",
+    "ruff>=0.16.0",
+    "mypy>=2.0.0",
 ]
 
 [tool.setuptools.packages.find]

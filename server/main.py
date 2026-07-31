@@ -2,6 +2,7 @@ import asyncio
 import io
 import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import Optional
 
 import torch
@@ -15,7 +16,32 @@ from pydantic import BaseModel
 
 from styleforge.engine import InferenceEngine
 
-app = FastAPI(title="StyleForge API", version="2.0.0")
+engine: Optional[InferenceEngine] = None
+styles_catalog: list[dict] = []
+jobs: dict[str, dict] = {}
+MAX_PIXELS_ASYNC = 1280 * 1280
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global engine, styles_catalog
+    device = torch.device("cpu")
+    engine = InferenceEngine(device=device)
+
+    catalog_path = os.getenv("STYLES_CATALOG", "styles/catalog.yaml")
+    if os.path.exists(catalog_path):
+        with open(catalog_path) as f:
+            data = yaml.safe_load(f)
+        styles_catalog = data.get("styles", [])
+
+    cin_model_path = os.getenv("CIN_MODEL_PATH", "models/multistyle.pth")
+    if os.path.exists(cin_model_path):
+        engine.load_cin("cin", cin_model_path, num_styles=len(styles_catalog))
+
+    yield
+
+
+app = FastAPI(title="StyleForge API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,29 +70,6 @@ class JobStatus(BaseModel):
     job_id: str
     status: str
     progress: Optional[float] = None
-
-
-engine: Optional[InferenceEngine] = None
-styles_catalog: list[dict] = []
-jobs: dict[str, dict] = {}
-MAX_PIXELS_ASYNC = 1280 * 1280
-
-
-@app.on_event("startup")
-async def startup():
-    global engine, styles_catalog
-    device = torch.device("cpu")
-    engine = InferenceEngine(device=device)
-
-    catalog_path = os.getenv("STYLES_CATALOG", "styles/catalog.yaml")
-    if os.path.exists(catalog_path):
-        with open(catalog_path) as f:
-            data = yaml.safe_load(f)
-        styles_catalog = data.get("styles", [])
-
-    cin_model_path = os.getenv("CIN_MODEL_PATH", "models/multistyle.pth")
-    if os.path.exists(cin_model_path):
-        engine.load_cin("cin", cin_model_path, num_styles=len(styles_catalog))
 
 
 @app.get("/api/health")
