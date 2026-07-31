@@ -140,7 +140,7 @@ StyleForge/
 ```
 ┌─────────────────┐
 │  COCO Dataset   │
-│  (val2017)      │
+│  (train2017)    │
 └────────┬────────┘
          │
          ▼
@@ -190,7 +190,7 @@ amp: 1  # Enable fp16 autocast
 Open `StyleForge.ipynb` in Google Colab:
 
 1. Upload `project.zip` (src/, styles/, configs/)
-2. Run setup cells (downloads COCO val2017 + VGG weights)
+2. Run setup cells (downloads COCO train2017 + VGG weights)
 3. Run training cell (calls `train_cin.py`)
 4. Download `multistyle.pth` + loss plot
 

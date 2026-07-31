@@ -243,14 +243,14 @@ curl http://localhost:8000/api/health
 
 **Prerequisites:**
 - CUDA-capable GPU (or CPU, but slow)
-- COCO dataset (val2017): ~1GB
+- COCO dataset (train2017): ~19GB, 118K images
 - VGG16 weights: auto-downloaded on first run
 
 **Step 1: Prepare the dataset**
 ```bash
-# Download COCO val2017
-wget http://images.cocodataset.org/zips/val2017.zip
-unzip val2017.zip -d training_content/
+# Download COCO train2017
+wget http://images.cocodataset.org/zips/train2017.zip
+unzip train2017.zip -d training_content/
 
 # Verify dataset integrity
 python scripts/check_data.py training_content/
@@ -265,7 +265,7 @@ python -m styleforge.train_cin cin \
     --save-model-name multistyle.pth \
     --cuda 1 \
     --amp 1 \
-    --epochs 4 \
+    --epochs 8 \
     --batch-size 4 \
     --lr 1e-3
 ```

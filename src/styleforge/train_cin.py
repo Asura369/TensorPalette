@@ -62,8 +62,9 @@ def train_cin(args):
         torch.cuda.manual_seed(args.seed)
 
     transform = transforms.Compose([
-        transforms.Resize(args.image_size),
-        transforms.CenterCrop(args.image_size),
+        transforms.Resize(args.image_size + 32),
+        transforms.RandomCrop(args.image_size),
+        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Lambda(lambda x: x.mul(255))
     ])
@@ -83,6 +84,7 @@ def train_cin(args):
 
     transformer = CINTransformer(num_styles=num_styles).to(device)
     optimizer = Adam(transformer.parameters(), args.lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     mse_loss = torch.nn.MSELoss()
     vgg = Vgg16(requires_grad=False).to(device)
     scaler = torch.amp.GradScaler(enabled=args.amp)
@@ -132,7 +134,12 @@ def train_cin(args):
                 features_y = vgg(y_norm)
                 features_x = vgg(x_norm)
 
-                content_loss = args.content_weight * mse_loss(features_y.relu2_2, features_x.relu2_2)
+                content_loss = 0.
+                for layer_name, weight in [("relu2_2", 1.0), ("relu4_2", 1.0)]:
+                    feat_y = getattr(features_y, layer_name)
+                    feat_x = getattr(features_x, layer_name)
+                    content_loss += weight * mse_loss(feat_y, feat_x)
+                content_loss *= args.content_weight
 
             # Compute style loss in fp32 outside autocast to prevent overflow
             style_loss = 0.
@@ -175,6 +182,8 @@ def train_cin(args):
         history["total"].append(epoch_total)
 
         print(f"\n[Stats] Epoch {e+1} Avg Loss: {epoch_total:.2f}")
+
+        scheduler.step()
 
         if args.checkpoint_model_dir:
             ckpt_path = os.path.join(args.checkpoint_model_dir, f"cin_ckpt_epoch_{e}.pth")
@@ -235,7 +244,7 @@ def main():
 
     if args.subcommand == "cin":
         defaults = {
-            "epochs": 4,
+            "epochs": 8,
             "batch_size": 4,
             "dataset": None,
             "style_images": None,
@@ -249,7 +258,7 @@ def main():
             "amp": 1,
             "seed": 42,
             "content_weight": 1e5,
-            "style_weight": 1e10,
+            "style_weight": 1e9,
             "lr": 1e-3,
             "log_interval": 500,
             "limit": None,
