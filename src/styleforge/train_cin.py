@@ -134,15 +134,14 @@ def train_cin(args):
 
                 content_loss = args.content_weight * mse_loss(features_y.relu2_2, features_x.relu2_2)
 
-                # Compute style loss in fp32 to prevent Gram matrix overflow
-                style_loss = 0.
-                for ft_y, gm_s in zip(features_y, gram_style):
-                    # Cast to fp32 before Gram matrix computation
-                    gm_y = utils.gram_matrix(ft_y.float())
-                    style_loss += mse_loss(gm_y, gm_s[:n_batch, :, :])
-                style_loss *= args.style_weight
+            # Compute style loss in fp32 outside autocast to prevent overflow
+            style_loss = 0.
+            for ft_y, gm_s in zip(features_y, gram_style):
+                gm_y = utils.gram_matrix(ft_y.float())
+                style_loss += mse_loss(gm_y, gm_s[:n_batch, :, :])
+            style_loss *= args.style_weight
 
-                total_loss = content_loss + style_loss
+            total_loss = content_loss + style_loss
 
             scaler.scale(total_loss).backward()
             scaler.step(optimizer)
