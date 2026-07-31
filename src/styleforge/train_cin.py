@@ -46,7 +46,7 @@ def load_style_images(style_image_paths, style_size, device):
     gram_styles = []
     for path in style_image_paths:
         img = utils.load_image(path, size=style_size)
-        img_t = style_transform(img).unsqueeze(0).to(device)
+        img_t: torch.Tensor = style_transform(img).unsqueeze(0).to(device)
         gram_styles.append(img_t)
     return gram_styles
 
