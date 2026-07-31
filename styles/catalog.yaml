@@ -1,0 +1,45 @@
+styles:
+  - id: 0
+    name: "starry_night"
+    display_name: "Starry Night"
+    filename: "starry_night.jpg"
+    artist: "Vincent van Gogh"
+    year: 1889
+    source: "WikiArt / MoMA (public domain)"
+    description: "Swirling night sky with bold impasto brushwork"
+
+  - id: 1
+    name: "great_wave"
+    display_name: "The Great Wave"
+    filename: "great_wave.jpg"
+    artist: "Katsushika Hokusai"
+    year: 1831
+    source: "WikiArt / Metropolitan Museum (public domain)"
+    description: "Japanese woodblock print with dramatic wave forms"
+
+  - id: 2
+    name: "girl_pearl"
+    display_name: "Girl with a Pearl Earring"
+    filename: "girl_pearl.jpg"
+    artist: "Johannes Vermeer"
+    year: 1665
+    source: "WikiArt / Mauritshuis (public domain)"
+    description: "Dutch Golden Age luminism and intimate portraiture"
+
+  - id: 3
+    name: "composition_viii"
+    display_name: "Composition VIII"
+    filename: "composition_viii.jpg"
+    artist: "Wassily Kandinsky"
+    year: 1923
+    source: "WikiArt / Guggenheim (public domain)"
+    description: "Abstract geometric forms with vivid color contrasts"
+
+  - id: 4
+    name: "water_lilies"
+    display_name: "Water Lilies"
+    filename: "water_lilies.jpg"
+    artist: "Claude Monet"
+    year: 1906
+    source: "WikiArt / Art Institute of Chicago (public domain)"
+    description: "Impressionist garden scene with soft light and color"

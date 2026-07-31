@@ -1,138 +1,349 @@
-# TensorPalette
+# StyleForge
 
-### **Streamlit Live:** https://tensorpalette.streamlit.app/
+**Neural Style Transfer Engine** — Curated multi-style CIN model + arbitrary AdaIN path, served via FastAPI + React.
 
-**High-Fidelity Neural Style Transfer Engine**
-
-**Language:** Python (PyTorch) | **Training:** Google Colab (T4 GPU) | **Inference:** Local (CPU)
-
-## 1. Executive Summary
-
-**TensorPalette** is a production-ready Generative AI application that transforms user photos into specific artistic styles in real-time.
-
-Unlike slow optimization-based methods that take minutes per image, TensorPalette utilizes a **Fast Neural Style Transfer** architecture. We leverage a "Hybrid Workflow": high-intensity training is performed on cloud GPUs (Google Colab) to create lightweight **Transformer Networks**. These optimized models are then deployed locally, allowing for instant, offline artistic rendering on standard consumer hardware.
+[![CI](https://github.com/Asura369/StyleForge/actions/workflows/ci.yml/badge.svg)](https://github.com/Asura369/StyleForge/actions/workflows/ci.yml)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Asura369/StyleForge/blob/main/StyleForge.ipynb)
 
 ---
 
-## 2. System Architecture
+## What is StyleForge?
 
-The system relies on a **Teacher-Student** training loop (Johnson et al. Perceptual Loss architecture).
+StyleForge is an AI-powered tool that transforms your photos into works of art. Upload any image and instantly apply the visual style of famous paintings — from Van Gogh's swirling Starry Night to Hokusai's dramatic Great Wave.
 
-### **A. The Transformer Network (The "Artist")**
-* **Type:** ResNet-based Autoencoder.
-* **Input:** Raw RGB Photograph (Any resolution).
-* **Output:** Stylized Image.
-* **Optimization:** Uses **Instance Normalization** to normalize contrast per image (preserving artistic textures) and **Reflection Padding** to eliminate border artifacts.
+**What makes it special:**
+- **Instant results** — Unlike other tools that take minutes per image, StyleForge processes photos in seconds
+- **Five curated styles** — Choose from masterpieces by Van Gogh, Hokusai, Vermeer, Kandinsky, and Monet
+- **Style blending** — Mix two artistic styles together to create unique combinations
+- **Works on any computer** — Runs efficiently on standard hardware, no expensive GPU required
+- **High resolution support** — Process images up to 4K quality without losing detail
 
-### **B. The Loss Network (The "Critic")**
-* **Type:** Pre-trained **VGG-16** (Frozen).
-* **Function:** Extracts feature maps to mathematically measure "Style" and "Content."
-* **Loss Calculation:**
-    * **Content Loss**: Euclidean distance at layer `relu2_2`.
-    * **Style Loss**: Gram Matrix distance at layers `relu1_2`, `relu2_2`, `relu3_3`, `relu4_3`.
-
----
-
-## 3. Application Features
-
-The local inference engine (`app.py`) includes advanced features for end-users:
-* **Real-Time Inference:** Sub-second processing on standard CPUs.
-* **Style Mixing:** "Style Strength" slider allowing users to blend the original photo with the stylized output.
-* **Smart Resolution:**
-    * **Standard Mode:** Auto-resizes large images to 1280px for speed.
-    * **High Res Mode:** Preserves original 4K+ quality for printing.
+**Perfect for:**
+- Artists and designers exploring creative possibilities
+- Photographers adding artistic flair to their work
+- Educators demonstrating AI and art concepts
+- Anyone curious about neural style transfer
 
 ---
 
-## 4. Directory Structure
+## Architecture
 
-```
-TensorPalette/
-├── models/                  # PRE-TRAINED MODELS
-│   ├── anime.pth
-│   ├── sketch.pth
-│   ├── oil.pth
-│   └── eastern.pth
-│
-├── src/                     # CORE LOGIC
-│   ├── transformer.py       # Model Architecture
-│   ├── vgg.py               # Loss Network
-│   ├── utils.py             # Image Utilities
-│   └── train.py             # Training Script
-│
-├── styles/                  # REFERENCE ART
-│
-├── app.py                   # STREAMLIT INTERFACE
-├── TensorPalette.ipynb      # COLAB TRAINING NOTEBOOK
-└── README.md
+```mermaid
+graph LR
+    A[Content Image] --> B{Path}
+    B -->|Curated Style| C[CIN Transformer]
+    B -->|Arbitrary Style| D[AdaIN Encoder-Decoder]
+    C -->|style_id or γ/β interp| E[Stylized Output]
+    D -->|Any style image| E
+    E --> F[4K Tiling + Blend]
+    F --> G[JPEG Output]
 ```
 
+**Dual inference path:**
+- **CIN** (Dumoulin 2017): Single model handles 5 curated styles via conditional instance normalization. Supports γ/β interpolation for continuous style blending.
+- **AdaIN** (Huang & Belongie 2017): Arbitrary style transfer — upload any style image. Frozen VGG encoder + trained decoder.
+
 ---
 
-## 5. Getting Started (Local Inference)
+## Features
+
+| Feature | Detail |
+|---------|--------|
+| Multi-style CIN | 5 curated public-domain styles in one model (~6MB) |
+| Style interpolation | Continuous γ/β blending between any two CIN styles |
+| Arbitrary style | AdaIN path for user-uploaded style images |
+| 4K tiling | Overlapping tiles (512px, 64px overlap) with linear-blend stitching |
+| AMP training | fp16 autocast + GradScaler on T4 (~1.5x speedup) |
+| Async jobs | Large images (>1280px) processed via background queue |
+| ONNX export | Optional onnxruntime path for CPU inference |
+
+---
+
+## Curated Styles
+
+| ID | Style | Artist | Year |
+|----|-------|--------|------|
+| 0 | Starry Night | Vincent van Gogh | 1889 |
+| 1 | The Great Wave | Katsushika Hokusai | 1831 |
+| 2 | Girl with a Pearl Earring | Johannes Vermeer | 1665 |
+| 3 | Composition VIII | Wassily Kandinsky | 1923 |
+| 4 | Water Lilies | Claude Monet | 1906 |
+
+All images are public domain. Source: WikiArt / respective museum collections.
+
+---
+
+## Quick Start
 
 ### Prerequisites
-- Python 3.10+
-- PyTorch
-- Streamlit
+
+- **Python 3.9+** (tested on 3.9, 3.10, 3.11)
+- **Node.js 18+** (for frontend development)
+- **Git** (for cloning)
+- **Docker** (optional, for containerized deployment)
 
 ### Installation
 
-1. **Clone & Setup:**
-```
-git clone git@github.com:Asura369/TensorPalette.git
-cd TensorPalette
+#### 1. Clone the Repository
 
-# Create & Activate Virtual Environment
+```bash
+git clone https://github.com/Asura369/StyleForge.git
+cd StyleForge
+```
+
+#### 2. Create Virtual Environment
+
+```bash
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-2. **Install Dependencies:**
-```
-pip install -r requirements.txt
+#### 3. Install Dependencies
 
+**For production (FastAPI server):**
+```bash
+pip install -e ".[server]"
 ```
 
-3. **Run the App:**
+**For development (Streamlit + testing):**
+```bash
+pip install -e .
+pip install -r requirements-dev.txt
 ```
+
+**For both:**
+```bash
+pip install -e ".[server,dev]"
+```
+
+#### 4. Download or Train the CIN Model
+
+The server requires `models/multistyle.pth`. You have two options:
+
+**Option A: Use pre-trained model (if available)**
+```bash
+# Download from releases or shared link
+wget https://example.com/multistyle.pth -O models/multistyle.pth
+```
+
+**Option B: Train your own (see Training section below)**
+
+#### 5. Verify Installation
+
+```bash
+# Check that the package imports correctly
+python -c "import styleforge; print('OK')"
+
+# Run the test suite
+pytest tests/ -v
+
+# Check linting
+ruff check src/ tests/ app.py scripts/ server/
+```
+
+All 24 tests should pass.
+
+---
+
+### Running the Application
+
+#### Production Mode (FastAPI + React)
+
+**Step 1: Build the frontend**
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+**Step 2: Start the server**
+```bash
+uvicorn server.main:app --host 0.0.0.0 --port 8000
+```
+
+**Step 3: Open your browser**
+```
+http://localhost:8000
+```
+
+The server automatically serves the React frontend from `frontend/dist/`.
+
+**Verify it's working:**
+```bash
+curl http://localhost:8000/api/health
+# Should return: {"status":"ok","model_loaded":true,"styles_available":5}
+```
+
+#### Local Development Mode
+
+**Backend (with hot reload):**
+```bash
+uvicorn server.main:app --reload --port 8000
+```
+
+**Frontend (separate terminal, with hot reload):**
+```bash
+cd frontend
+npm run dev
+```
+
+The frontend dev server proxies `/api` requests to `localhost:8000`.
+
+#### Streamlit UI (Legacy)
+
+```bash
 streamlit run app.py
+```
 
+Opens at `http://localhost:8501`. Note: This is for local development only. The production app uses FastAPI + React.
+
+#### Docker
+
+**Build the image:**
+```bash
+docker build -t styleforge .
+```
+
+**Run the container:**
+```bash
+docker run -p 8000:8000 styleforge
+```
+
+**Verify:**
+```bash
+curl http://localhost:8000/api/health
 ```
 
 ---
 
-## 6. Training (Cloud Workflow)
+### Training a Model
 
-Training requires significant GPU power. We utilize **Google Colab (Free Tier / T4 GPU)** for the heavy lifting.
+#### Using Google Colab (Recommended)
 
-1. **Prepare Project:** Zip your `src/` and `styles/` folders to `project.zip` and upload it to your Colab session.
-2. **Open Notebook:** Run `TensorPalette.ipynb`.
-3. **Automatic Setup:**
-    * The notebook automatically downloads the **COCO Dataset** (Validation set ~1GB).
-    * It downloads the pre-trained **VGG-16 weights** (~500MB).
-4. **Execute Training:**
-    * Run the training cell. A typical high-fidelity run takes **~45 minutes** for 4 epochs on 5,000+ images.
-5. **Export:**
-    * Download the resulting `.pth` file (e.g., `oil.pth`) and the loss graph.
-    * Place the `.pth` file into your local `models/` directory.
+1. Open [`StyleForge.ipynb`](StyleForge.ipynb) in [Google Colab](https://colab.research.google.com/)
+2. Upload `project.zip` (containing `src/`, `styles/`, `configs/`)
+3. Run all cells
+4. Download `multistyle.pth` from the output
+5. Place it in `models/`
 
+#### Manual Training (Local GPU)
 
-**Training Command Reference:**
-*If running manually in a terminal environment:*
+**Prerequisites:**
+- CUDA-capable GPU (or CPU, but slow)
+- COCO dataset (val2017): ~1GB
+- VGG16 weights: auto-downloaded on first run
 
+**Step 1: Prepare the dataset**
+```bash
+# Download COCO val2017
+wget http://images.cocodataset.org/zips/val2017.zip
+unzip val2017.zip -d training_content/
+
+# Verify dataset integrity
+python scripts/check_data.py training_content/
 ```
-python src/train.py train \
+
+**Step 2: Train the CIN model**
+```bash
+python -m styleforge.train_cin cin \
     --dataset training_content \
-    --style-image styles/oil.jpg \
-    --save-model-dir models \
-    --save-model-name oil \
+    --style-images styles/starry_night.jpg,styles/great_wave.jpg,styles/girl_pearl.jpg,styles/composition_viii.jpg,styles/water_lilies.jpg \
+    --save-model-dir models/ \
+    --save-model-name multistyle.pth \
     --cuda 1 \
+    --amp 1 \
     --epochs 4 \
-    --limit 10000 \
-    --image-size 400 \
-    --style-size 512
+    --batch-size 4 \
+    --lr 1e-3
+```
 
+**Step 3: Verify the model**
+```bash
+pytest tests/test_models.py -v
+```
+
+**Expected output:**
+- Training takes ~30-45 minutes on a T4 GPU
+- Loss should decrease from ~1e10 to ~1e8
+- Model size: ~6MB
+- Checkpoint saved to `models/multistyle.pth`
+
+---
+
+### Troubleshooting
+
+**"Model not found" error:**
+- Ensure `models/multistyle.pth` exists
+- Check `CIN_MODEL_PATH` environment variable
+
+**Frontend not loading:**
+- Build the frontend: `cd frontend && npm run build`
+- Check that `frontend/dist/` exists
+
+**Out of memory on large images:**
+- The tiling module automatically handles images >1280px
+- Reduce `--batch-size` during training
+
+**Tests fail:**
+- Ensure all dependencies are installed: `pip install -e ".[dev]"`
+- Check that `models/multistyle.pth` exists (or tests will skip)
+
+For more details, see [`REPO_STRUCTURE.md`](REPO_STRUCTURE.md).
+
+---
+
+## Project Structure
+
+See [`REPO_STRUCTURE.md`](REPO_STRUCTURE.md) for a complete annotated directory tree, data flow diagrams, model lifecycle, and troubleshooting guide.
+
+```
+StyleForge/
+├── src/styleforge/          # Core Python package
+├── server/main.py          # FastAPI API + static serving
+├── frontend/               # Vite + React + TypeScript
+├── styles/catalog.yaml     # Style roster + attribution
+├── configs/default.yaml    # Training hyperparameters
+├── scripts/                # Benchmark + data validation
+├── tests/                  # pytest suite (24 tests)
+├── Dockerfile              # Multi-stage: node → python
+└── pyproject.toml          # Package config
 ```
 
 ---
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Model status |
+| GET | `/api/styles` | Curated style list |
+| POST | `/api/stylize` | Multipart image + style params → JPEG |
+| GET | `/api/jobs/{id}` | Poll async job status / get result |
+
+### POST /api/stylize
+
+Form fields: `image` (file), `style_id` (int), or `style_a` + `style_b` + `alpha` for interpolation, `quality` (standard/high_res).
+
+---
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+ruff check src/ tests/ app.py scripts/ server/
+mypy src/styleforge/ --ignore-missing-imports
+pytest tests/ -v
+```
+
+---
+
+## Benchmarks
+
+Run `python scripts/evaluate.py` to regenerate `docs/benchmarks.md` with latency tables for your hardware.
+
+---
+
+## License
+
+MIT

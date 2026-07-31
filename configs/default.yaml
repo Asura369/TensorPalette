@@ -1,0 +1,11 @@
+epochs: 2
+batch-size: 4
+image-size: 256
+style-size: 512
+cuda: 1
+seed: 42
+content-weight: 1.0e5
+style-weight: 1.0e10
+lr: 1.0e-3
+log-interval: 500
+checkpoint-interval: 2000

@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "styleforge"
+version = "2.0.0"
+description = "Fast Neural Style Transfer Engine"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "matplotlib>=3.7.0",
+    "tqdm>=4.65.0",
+    "streamlit>=1.28.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "python-multipart>=0.0.6",
+]
+dev = [
+    "pytest>=7.4.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
