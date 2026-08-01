@@ -4,6 +4,7 @@ from PIL import Image
 
 from styleforge.cin import CINTransformer
 from styleforge.engine import InferenceEngine
+from styleforge.tiling import tiled_inference
 
 
 class TestInferenceEngine:
@@ -52,3 +53,42 @@ class TestInferenceEngine:
 
         assert not np.allclose(arr_a, arr_b)
         assert not np.allclose(arr_a, arr_mid)
+
+    def test_stylize_large_image_uses_tiling(self, tmp_path):
+        model = self._make_cin_model()
+        model_path = str(tmp_path / "cin.pth")
+        torch.save(model.state_dict(), model_path)
+
+        engine = InferenceEngine(device=torch.device("cpu"))
+        engine.load_cin("test_cin", model_path, num_styles=3)
+
+        arr = np.random.randint(0, 255, (1300, 1300, 3), dtype=np.uint8)
+        img = Image.fromarray(arr)
+        result = engine.stylize(img, "test_cin", style_id=1)
+        assert result.size == (1300, 1300)
+
+        content = torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
+        style_ids = torch.tensor([1])
+        expected = tiled_inference(content, lambda tile: model(tile, style_ids)).clamp(0, 255)
+        got = torch.tensor(np.array(result), dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
+        assert torch.allclose(got, expected, atol=1.0)
+
+    def test_stylize_large_image_interp_uses_tiling(self, tmp_path):
+        model = self._make_cin_model()
+        model_path = str(tmp_path / "cin.pth")
+        torch.save(model.state_dict(), model_path)
+
+        engine = InferenceEngine(device=torch.device("cpu"))
+        engine.load_cin("test_cin", model_path, num_styles=3)
+
+        arr = np.random.randint(0, 255, (1300, 1300, 3), dtype=np.uint8)
+        img = Image.fromarray(arr)
+        result = engine.stylize(img, "test_cin", style_a=0, style_b=2, alpha=0.5)
+        assert result.size == (1300, 1300)
+
+        content = torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
+        expected = tiled_inference(
+            content, lambda tile: model.forward_interpolated(tile, 0, 2, 0.5)
+        ).clamp(0, 255)
+        got = torch.tensor(np.array(result), dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
+        assert torch.allclose(got, expected, atol=1.0)

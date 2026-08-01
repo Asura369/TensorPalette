@@ -5,6 +5,7 @@ import torchvision.transforms as T
 from PIL import Image
 
 from styleforge.cin import CINTransformer
+from styleforge.tiling import TILE_THRESHOLD, tiled_inference
 from styleforge.transformer import StyleTransformer
 
 
@@ -63,7 +64,10 @@ class InferenceEngine:
             if style_a is not None and style_b is not None:
                 return self._stylize_cin_interp(model, content, style_a, style_b, alpha)
             style_ids = torch.tensor([style_id], device=self.device)
-            output = model(content, style_ids)
+            if max(content.shape[2], content.shape[3]) > TILE_THRESHOLD:
+                output = tiled_inference(content, lambda tile: model(tile, style_ids))
+            else:
+                output = model(content, style_ids)
         else:
             output = model(content)
 
@@ -77,7 +81,12 @@ class InferenceEngine:
         style_b: int,
         alpha: float,
     ) -> Image.Image:
-        output = model.forward_interpolated(content, style_a, style_b, alpha)
+        if max(content.shape[2], content.shape[3]) > TILE_THRESHOLD:
+            output = tiled_inference(
+                content, lambda tile: model.forward_interpolated(tile, style_a, style_b, alpha)
+            )
+        else:
+            output = model.forward_interpolated(content, style_a, style_b, alpha)
         return self._tensor_to_image(output)
 
     def _tensor_to_image(self, tensor: torch.Tensor) -> Image.Image:

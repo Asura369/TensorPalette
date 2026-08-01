@@ -53,13 +53,14 @@ StyleForge/
 │   ├── evaluate.py             # Benchmark harness → docs/benchmarks.md
 │   └── check_data.py           # Validate training dataset integrity
 │
-├── tests/                      # pytest suite (24 tests)
+├── tests/                      # pytest suite (37 tests)
 │   ├── test_utils.py           # Gram matrix, normalize/denormalize
 │   ├── test_transformer.py     # StyleTransformer output shapes
 │   ├── test_cin.py             # CIN module + interpolation
 │   ├── test_engine.py          # InferenceEngine integration
 │   ├── test_tiling.py          # 4K tiling + blending
-│   └── test_models.py          # CIN model load + inference
+│   ├── test_models.py          # CIN model load + inference
+│   └── test_server.py          # FastAPI endpoints + validation
 │
 ├── .github/workflows/          # CI/CD
 │   └── ci.yml                  # Lint + typecheck + pytest

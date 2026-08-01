@@ -1,17 +1,18 @@
 import asyncio
 import io
 import os
+import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import torch
 import yaml
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from PIL import Image
+from PIL import Image, ImageOps
 from pydantic import BaseModel
 
 from styleforge.engine import InferenceEngine
@@ -19,7 +20,37 @@ from styleforge.engine import InferenceEngine
 engine: Optional[InferenceEngine] = None
 styles_catalog: list[dict] = []
 jobs: dict[str, dict] = {}
+pending_tasks: set[asyncio.Task] = set()
+job_semaphore = asyncio.Semaphore(2)
 MAX_PIXELS_ASYNC = 1280 * 1280
+MAX_JOBS = 100
+JOB_TTL_SECONDS = 1800
+
+
+def _upload_limit_bytes() -> int:
+    return int(os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+
+
+def _max_image_pixels() -> int:
+    return int(os.getenv("MAX_IMAGE_PIXELS", str(33_000_000)))
+
+
+def _purge_jobs() -> None:
+    now = time.time()
+    expired = [
+        jid
+        for jid, job in jobs.items()
+        if job["status"] in ("complete", "error") and now - job["created_at"] > JOB_TTL_SECONDS
+    ]
+    for jid in expired:
+        del jobs[jid]
+    if len(jobs) > MAX_JOBS:
+        active = {jid for jid, job in jobs.items() if job["status"] in ("queued", "processing")}
+        candidates = sorted(
+            (jid for jid in jobs if jid not in active), key=lambda jid: jobs[jid]["created_at"]
+        )
+        for jid in candidates[: len(jobs) - MAX_JOBS]:
+            del jobs[jid]
 
 
 @asynccontextmanager
@@ -58,14 +89,6 @@ class StyleInfo(BaseModel):
     description: str
 
 
-class StylizeRequest(BaseModel):
-    style_id: Optional[int] = None
-    style_a: Optional[int] = None
-    style_b: Optional[int] = None
-    alpha: Optional[float] = None
-    quality: str = "standard"
-
-
 class JobStatus(BaseModel):
     job_id: str
     status: str
@@ -96,6 +119,7 @@ async def list_styles():
 
 @app.post("/api/stylize")
 async def stylize(
+    request: Request,
     image: UploadFile = File(...),
     style_id: Optional[int] = Form(None),
     style_a: Optional[int] = Form(None),
@@ -106,19 +130,59 @@ async def stylize(
     if engine is None or not engine._models:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    content = await image.read()
+    limit = _upload_limit_bytes()
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            too_big = int(content_length) > limit
+        except ValueError:
+            too_big = False
+        if too_big:
+            raise HTTPException(status_code=413, detail=f"Upload exceeds the {limit}-byte limit")
+    content = await image.read(limit + 1)
+    if len(content) > limit:
+        raise HTTPException(status_code=413, detail=f"Upload exceeds the {limit}-byte limit")
+
     try:
-        img = Image.open(io.BytesIO(content)).convert("RGB")
+        img = Image.open(io.BytesIO(content))
+        if img.size[0] * img.size[1] > _max_image_pixels():
+            raise HTTPException(status_code=400, detail="Image dimensions exceed the 33-megapixel limit")
+        img = ImageOps.exif_transpose(img.convert("RGB"))
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid image file")
+
+    num_styles = len(styles_catalog)
+    if quality not in ("standard", "high_res"):
+        raise HTTPException(status_code=400, detail="quality must be 'standard' or 'high_res'")
+    if style_id is not None and (style_a is not None or style_b is not None):
+        raise HTTPException(status_code=400, detail="Provide either style_id or style_a+style_b, not both")
+    if style_a is not None or style_b is not None:
+        if style_a is None or style_b is None:
+            raise HTTPException(status_code=400, detail="Both style_a and style_b are required for interpolation")
+        if style_a == style_b:
+            raise HTTPException(status_code=400, detail="style_a and style_b must be different styles")
+        if not (0 <= style_a < num_styles and 0 <= style_b < num_styles):
+            raise HTTPException(status_code=400, detail=f"style_a/style_b must be in [0, {num_styles - 1}]")
+        if alpha is None or not (0.0 <= alpha <= 1.0):
+            raise HTTPException(status_code=400, detail="alpha must be in [0, 1]")
+    elif style_id is not None:
+        if not (0 <= style_id < num_styles):
+            raise HTTPException(status_code=400, detail=f"style_id must be in [0, {num_styles - 1}]")
 
     w, h = img.size
     total_pixels = w * h
 
     if total_pixels > MAX_PIXELS_ASYNC:
         job_id = str(uuid.uuid4())
-        jobs[job_id] = {"status": "queued", "progress": 0.0}
-        asyncio.create_task(_process_large_image(job_id, img, style_id, style_a, style_b, alpha, quality))
+        jobs[job_id] = {"status": "queued", "progress": 0.0, "created_at": time.time()}
+        _purge_jobs()
+        task = asyncio.create_task(
+            _process_large_image(job_id, img, style_id, style_a, style_b, alpha, quality)
+        )
+        pending_tasks.add(task)
+        task.add_done_callback(pending_tasks.discard)
         return JSONResponse({"job_id": job_id, "status": "queued"})
 
     result_img = _run_stylize(img, style_id, style_a, style_b, alpha, quality)
@@ -129,18 +193,19 @@ async def stylize(
 
 
 async def _process_large_image(job_id, img, style_id, style_a, style_b, alpha, quality):
-    try:
-        jobs[job_id]["status"] = "processing"
-        jobs[job_id]["progress"] = 0.5
-        result = await asyncio.to_thread(_run_stylize, img, style_id, style_a, style_b, alpha, quality)
-        buf = io.BytesIO()
-        result.save(buf, format="JPEG", quality=92)
-        jobs[job_id]["status"] = "complete"
-        jobs[job_id]["progress"] = 1.0
-        jobs[job_id]["result"] = buf.getvalue()
-    except Exception as e:
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["error"] = str(e)
+    async with job_semaphore:
+        try:
+            jobs[job_id]["status"] = "processing"
+            jobs[job_id]["progress"] = 0.5
+            result = await asyncio.to_thread(_run_stylize, img, style_id, style_a, style_b, alpha, quality)
+            buf = io.BytesIO()
+            result.save(buf, format="JPEG", quality=92)
+            jobs[job_id]["status"] = "complete"
+            jobs[job_id]["progress"] = 1.0
+            jobs[job_id]["result"] = buf.getvalue()
+        except Exception as e:
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["error"] = str(e)
 
 
 def _run_stylize(img, style_id, style_a, style_b, alpha, quality):

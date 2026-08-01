@@ -53,6 +53,7 @@ graph LR
 | Style interpolation | Continuous γ/β blending between any two CIN styles |
 | Arbitrary style | AdaIN path for user-uploaded style images |
 | 4K tiling | Overlapping tiles (512px, 64px overlap) with linear-blend stitching |
+| Input safety | 20MB upload cap, 33MP pixel limit, EXIF-aware, validated style params |
 | AMP training | fp16 autocast + GradScaler on T4 (~1.5x speedup) |
 | Async jobs | Large images (>1280px) processed via background queue |
 | ONNX export | Optional onnxruntime path for CPU inference |
@@ -151,7 +152,7 @@ pytest tests/ -v
 ruff check src/ tests/ app.py scripts/ server/
 ```
 
-All 22 tests should pass.
+All 37 tests should pass.
 
 ---
 
@@ -317,7 +318,7 @@ StyleForge/
 ├── styles/catalog.yaml     # Style roster + attribution
 ├── configs/default.yaml    # Training hyperparameters
 ├── scripts/                # Benchmark + data validation
-├── tests/                  # pytest suite (24 tests)
+├── tests/                  # pytest suite (37 tests)
 ├── Dockerfile              # Multi-stage: node → python
 └── pyproject.toml          # Package config
 ```

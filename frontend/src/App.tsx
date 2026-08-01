@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { StyleGallery } from "./components/StyleGallery";
 import { UploadZone } from "./components/UploadZone";
 import { CompareView } from "./components/CompareView";
@@ -28,9 +28,9 @@ export default function App() {
     }
   }, []);
 
-  useState(() => {
+  useEffect(() => {
     loadStyles();
-  });
+  }, [loadStyles]);
 
   const handleUpload = useCallback((file: File) => {
     const reader = new FileReader();
@@ -87,21 +87,32 @@ export default function App() {
     }
   }, [originalImage, selectedStyle, mixStyleA, mixStyleB, mixAlpha]);
 
-  const pollJob = useCallback(async (jobId: string) => {
+  const pollJob = useCallback((jobId: string) => {
+    let attempts = 0;
+    const MAX_ATTEMPTS = 300;
     const poll = async () => {
+      attempts += 1;
+      if (attempts > MAX_ATTEMPTS) {
+        setState("error");
+        setError("Timed out waiting for the result");
+        return;
+      }
       try {
         const res = await fetch(`/api/jobs/${jobId}`);
-        const data = await res.json();
-        if (data.status === "complete") {
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("image")) {
           const blob = await res.blob();
           const url = URL.createObjectURL(blob);
           setResultImage(url);
           setState("result");
-        } else if (data.status === "error") {
-          setState("error");
-          setError(data.error || "Processing failed");
         } else {
-          setTimeout(poll, 1000);
+          const data = await res.json();
+          if (data.status === "error") {
+            setState("error");
+            setError(data.error || "Processing failed");
+          } else {
+            setTimeout(poll, 1000);
+          }
         }
       } catch {
         setState("error");
