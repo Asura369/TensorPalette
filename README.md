@@ -91,7 +91,6 @@ The 5 curated style images are bundled in the `styles/` directory. All images ar
 - **Python 3.12+** (tested on 3.12)
 - **Node.js 18+** (for frontend development)
 - **Git** (for cloning)
-- **Docker** (optional, for containerized deployment)
 
 ### Installation
 
@@ -111,20 +110,10 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 #### 3. Install Dependencies
 
-**For production (FastAPI server):**
-```bash
-pip install -e ".[server]"
-```
+One command installs everything — runtime, server, and dev dependencies:
 
-**For development (Streamlit + testing):**
 ```bash
-pip install -e .
-pip install -r requirements-dev.txt
-```
-
-**For both:**
-```bash
-pip install -e ".[server,dev]"
+pip install -r requirements.txt
 ```
 
 #### 4. Download or Train the CIN Model
@@ -149,7 +138,7 @@ python -c "import styleforge; print('OK')"
 pytest tests/ -v
 
 # Check linting
-ruff check src/ tests/ app.py scripts/ server/
+ruff check styleforge/ tests/ scripts/ server/
 ```
 
 All 37 tests should pass.
@@ -201,23 +190,6 @@ npm run dev
 
 The frontend dev server proxies `/api` requests to `localhost:8000`.
 
-#### Docker
-
-**Build the image:**
-```bash
-docker build -t styleforge .
-```
-
-**Run the container:**
-```bash
-docker run -p 8000:8000 styleforge
-```
-
-**Verify:**
-```bash
-curl http://localhost:8000/api/health
-```
-
 ---
 
 ### Training a Model
@@ -230,7 +202,7 @@ curl http://localhost:8000/api/health
    ```
    This creates a ~2.5MB zip containing:
    - `pyproject.toml` — package metadata
-   - `src/styleforge/` — Python package
+   - `styleforge/` — Python package
    - `styles/` — 5 style images + catalog
    - `configs/` — training configuration
    - `StyleForge.ipynb` — the notebook
@@ -299,7 +271,7 @@ pytest tests/test_models.py -v
 - Reduce `--batch-size` during training
 
 **Tests fail:**
-- Ensure all dependencies are installed: `pip install -e ".[dev]"`
+- Ensure all dependencies are installed: `pip install -r requirements.txt`
 - Check that `models/multistyle.pth` exists (or tests will skip)
 
 For more details, see [`REPO_STRUCTURE.md`](REPO_STRUCTURE.md).
@@ -312,15 +284,14 @@ See [`REPO_STRUCTURE.md`](REPO_STRUCTURE.md) for a complete annotated directory 
 
 ```
 StyleForge/
-├── src/styleforge/          # Core Python package
+├── styleforge/              # Core Python package
 ├── server/main.py          # FastAPI API + static serving
 ├── frontend/               # Vite + React + TypeScript
 ├── styles/catalog.yaml     # Style roster + attribution
 ├── configs/default.yaml    # Training hyperparameters
 ├── scripts/                # Benchmark + data validation
 ├── tests/                  # pytest suite (37 tests)
-├── Dockerfile              # Multi-stage: node → python
-└── pyproject.toml          # Package config
+└── pyproject.toml          # Tool config
 ```
 
 ---
@@ -343,9 +314,9 @@ Form fields: `image` (file), `style_id` (int), or `style_a` + `style_b` + `alpha
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-ruff check src/ tests/ app.py scripts/ server/
-mypy src/styleforge/ --ignore-missing-imports
+pip install -r requirements.txt
+ruff check styleforge/ tests/ scripts/ server/
+mypy styleforge/ --ignore-missing-imports
 pytest tests/ -v
 ```
 

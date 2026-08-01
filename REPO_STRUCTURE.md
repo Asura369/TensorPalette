@@ -8,7 +8,7 @@ This document provides a complete guide to the StyleForge codebase, including di
 
 ```
 StyleForge/
-├── src/styleforge/              # Core Python package
+├── styleforge/                  # Core Python package
 │   ├── __init__.py             # Package exports
 │   ├── transformer.py          # Single-style transformer (Johnson 2016)
 │   ├── cin.py                  # Conditional Instance Norm (Dumoulin 2017)
@@ -63,14 +63,11 @@ StyleForge/
 │   └── test_server.py          # FastAPI endpoints + validation
 │
 ├── .github/workflows/          # CI/CD
-│   └── ci.yml                  # Lint + typecheck + pytest
+│   └── ci.yml                  # Lint + typecheck + pytest + frontend build
 │
-├── app.py                      # Streamlit UI (local dev only)
 ├── StyleForge.ipynb         # Colab training notebook
-├── Dockerfile                  # Multi-stage: node build → python runtime
-├── pyproject.toml              # Package config + tool settings
-├── requirements.txt            # Production dependencies (pinned)
-├── requirements-dev.txt        # Dev dependencies (pytest, ruff, mypy)
+├── pyproject.toml              # Tool config (ruff, mypy, packaging)
+├── requirements.txt            # All dependencies (pinned)
 ├── README.md                   # Project overview + quick start
 └── REPO_STRUCTURE.md           # This file
 ```
@@ -190,7 +187,7 @@ amp: 1  # Enable fp16 autocast
 
 Open `StyleForge.ipynb` in Google Colab:
 
-1. Upload `project.zip` (src/, styles/, configs/)
+1. Upload `project.zip` (styleforge/, styles/, configs/)
 2. Run setup cells (downloads COCO train2017 + VGG weights)
 3. Run training cell (calls `train_cin.py`)
 4. Download `multistyle.pth` + loss plot
@@ -379,14 +376,14 @@ pytest tests/ -v
 ### Lint Code
 
 ```bash
-ruff check src/ tests/ app.py scripts/ server/
+ruff check styleforge/ tests/ scripts/ server/
 ruff check --fix .  # Auto-fix
 ```
 
 ### Type Check
 
 ```bash
-mypy src/styleforge/ --ignore-missing-imports
+mypy styleforge/ --ignore-missing-imports
 ```
 
 ### Run Locally (Dev Mode)
@@ -411,23 +408,16 @@ npm run build
 uvicorn server.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Docker
-
-```bash
-docker build -t styleforge .
-docker run -p 8000:8000 styleforge
-```
-
 ---
 
 ## Key Files Reference
 
 | File | Purpose |
 |------|---------|
-| `src/styleforge/cin.py` | CIN model architecture (γ/β per style) |
-| `src/styleforge/engine.py` | Unified inference API |
-| `src/styleforge/tiling.py` | 4K tiling + linear-blend stitching |
-| `src/styleforge/train_cin.py` | Multi-style training with AMP |
+| `styleforge/cin.py` | CIN model architecture (γ/β per style) |
+| `styleforge/engine.py` | Unified inference API |
+| `styleforge/tiling.py` | 4K tiling + linear-blend stitching |
+| `styleforge/train_cin.py` | Multi-style training with AMP |
 | `server/main.py` | FastAPI endpoints + static serving |
 | `frontend/src/App.tsx` | Main React component |
 | `styles/catalog.yaml` | Style metadata + attribution |

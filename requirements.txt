@@ -4,4 +4,11 @@ numpy==2.5.1
 Pillow==12.3.0
 matplotlib==3.11.1
 tqdm==4.70.0
-pyyaml==6.0.2
+pyyaml==6.0.3
+fastapi==0.141.1
+uvicorn==0.52.0
+python-multipart==0.0.32
+pytest==9.1.1
+ruff==0.16.1
+mypy==2.3.0
+httpx2==2.9.1
