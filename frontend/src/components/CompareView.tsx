@@ -11,8 +11,9 @@ export function CompareView({ original, result, loading }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
 
-  const handlePointerDown = useCallback(() => {
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
     dragging.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
   }, []);
 
   const handlePointerMove = useCallback(
@@ -35,11 +36,15 @@ export function CompareView({ original, result, loading }: Props) {
       ref={containerRef}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
       onPointerLeave={handlePointerUp}
     >
       {original && <img src={original} alt="Original" />}
       {result && (
-        <div className="overlay" style={{ width: `${sliderPos}%` }}>
+        <div
+          className="overlay"
+          style={{ clipPath: `inset(0 ${100 - sliderPos}% 0 0)` }}
+        >
           <img src={result} alt="Stylized" />
         </div>
       )}
