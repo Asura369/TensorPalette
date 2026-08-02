@@ -89,12 +89,6 @@ class StyleInfo(BaseModel):
     description: str
 
 
-class JobStatus(BaseModel):
-    job_id: str
-    status: str
-    progress: Optional[float] = None
-
-
 @app.get("/api/health")
 async def health():
     return {

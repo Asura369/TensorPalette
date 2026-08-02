@@ -1,6 +1,6 @@
 import torch
 
-from styleforge.utils import denormalize_batch, gram_matrix, normalize_batch
+from styleforge.utils import gram_matrix, normalize_batch
 
 
 class TestGramMatrix:
@@ -21,14 +21,7 @@ class TestGramMatrix:
         assert torch.allclose(gram, torch.full((1, 2, 2), expected_val), atol=1e-6)
 
 
-class TestNormalizeRoundTrip:
-    def test_round_trip(self):
-        original = torch.rand(2, 3, 64, 64) * 255
-        normalized = normalize_batch(original.clone())
-        recovered = denormalize_batch(normalized)
-        assert torch.allclose(original, recovered, atol=1e-3)
-
-    def test_normalized_range(self):
-        batch = torch.full((1, 3, 4, 4), 128.0)
-        normed = normalize_batch(batch)
-        assert normed.mean().abs() < 1.0
+def test_normalize_applies_imagenet_scaling():
+    batch = torch.full((1, 3, 4, 4), 128.0)
+    normed = normalize_batch(batch)
+    assert normed.mean().abs() < 1.0

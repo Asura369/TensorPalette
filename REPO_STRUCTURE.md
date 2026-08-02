@@ -10,15 +10,13 @@ This document provides a complete guide to the StyleForge codebase, including di
 StyleForge/
 ├── styleforge/                  # Core Python package
 │   ├── __init__.py             # Package exports
-│   ├── transformer.py          # Single-style transformer (Johnson 2016)
+│   ├── transformer.py          # Shared conv layers (used by cin.py)
 │   ├── cin.py                  # Conditional Instance Norm (Dumoulin 2017)
 │   ├── adain.py                # AdaIN arbitrary style (Huang 2017)
 │   ├── engine.py               # Unified inference engine
 │   ├── tiling.py               # 4K overlapping tile + linear-blend stitch
-│   ├── onnx_export.py          # ONNX export utilities
 │   ├── vgg.py                  # VGG-16 feature extractor
 │   ├── utils.py                # Image I/O, Gram matrix, normalize
-│   ├── train.py                # Single-style training (legacy)
 │   └── train_cin.py            # Multi-style CIN training (AMP)
 │
 ├── server/                     # FastAPI backend
@@ -53,9 +51,8 @@ StyleForge/
 │   ├── evaluate.py             # Benchmark harness → docs/benchmarks.md
 │   └── check_data.py           # Validate training dataset integrity
 │
-├── tests/                      # pytest suite (37 tests)
+├── tests/                      # pytest suite
 │   ├── test_utils.py           # Gram matrix, normalize/denormalize
-│   ├── test_transformer.py     # StyleTransformer output shapes
 │   ├── test_cin.py             # CIN module + interpolation
 │   ├── test_engine.py          # InferenceEngine integration
 │   ├── test_tiling.py          # 4K tiling + blending
@@ -170,16 +167,17 @@ StyleForge/
 
 ### 1. Training Configuration
 
-Edit `configs/default.yaml` or pass CLI args:
+Edit `configs/default.yaml` or pass CLI args (CLI overrides the config file):
 
 ```yaml
-epochs: 4
+epochs: 8
 batch-size: 4
 image-size: 256
 style-size: 512
 content-weight: 1.0e5
-style-weight: 1.0e10
+style-weight: 1.0e9
 lr: 1.0e-3
+val-fraction: 0.02  # held out for validation
 amp: 1  # Enable fp16 autocast
 ```
 

@@ -6,7 +6,6 @@ from PIL import Image
 
 from styleforge.cin import CINTransformer
 from styleforge.tiling import TILE_THRESHOLD, tiled_inference
-from styleforge.transformer import StyleTransformer
 
 
 def pick_device() -> torch.device:
@@ -20,15 +19,7 @@ def pick_device() -> torch.device:
 class InferenceEngine:
     def __init__(self, device: Optional[torch.device] = None):
         self.device = device or pick_device()
-        self._models: dict[str, torch.nn.Module] = {}
-
-    def load_single_style(self, name: str, model_path: str) -> None:
-        model = StyleTransformer()
-        state_dict = torch.load(model_path, map_location=self.device, weights_only=True)
-        model.load_state_dict(state_dict)
-        model.to(self.device)
-        model.eval()
-        self._models[name] = model
+        self._models: dict[str, CINTransformer] = {}
 
     def load_cin(self, name: str, model_path: str, num_styles: int) -> None:
         model = CINTransformer(num_styles=num_styles)
@@ -38,7 +29,7 @@ class InferenceEngine:
         model.eval()
         self._models[name] = model
 
-    def get_model(self, name: str) -> torch.nn.Module:
+    def get_model(self, name: str) -> CINTransformer:
         if name not in self._models:
             raise KeyError(f"Model '{name}' not loaded. Available: {list(self._models.keys())}")
         return self._models[name]
@@ -60,16 +51,13 @@ class InferenceEngine:
         ])
         content = content_transform(image).unsqueeze(0).to(self.device)
 
-        if isinstance(model, CINTransformer):
-            if style_a is not None and style_b is not None:
-                return self._stylize_cin_interp(model, content, style_a, style_b, alpha)
-            style_ids = torch.tensor([style_id], device=self.device)
-            if max(content.shape[2], content.shape[3]) > TILE_THRESHOLD:
-                output = tiled_inference(content, lambda tile: model(tile, style_ids))
-            else:
-                output = model(content, style_ids)
+        if style_a is not None and style_b is not None:
+            return self._stylize_cin_interp(model, content, style_a, style_b, alpha)
+        style_ids = torch.tensor([style_id], device=self.device)
+        if max(content.shape[2], content.shape[3]) > TILE_THRESHOLD:
+            output = tiled_inference(content, lambda tile: model(tile, style_ids))
         else:
-            output = model(content)
+            output = model(content, style_ids)
 
         return self._tensor_to_image(output)
 

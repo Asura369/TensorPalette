@@ -104,21 +104,3 @@ class CINTransformer(nn.Module):
         y = self.relu(self.cin5.forward_interpolated(self.deconv2(y), style_id_a, style_id_b, alpha))
         y = self.deconv3(y)
         return y
-
-    def get_style_params(self, style_id):
-        params = {}
-        for name, module in self.named_modules():
-            if isinstance(module, ConditionalInstanceNorm2d):
-                params[name] = {
-                    "gamma": module.gamma[style_id].clone(),
-                    "beta": module.beta[style_id].clone(),
-                }
-        return params
-
-    def set_style_params(self, style_id, gamma_dict, beta_dict):
-        for name, module in self.named_modules():
-            if isinstance(module, ConditionalInstanceNorm2d):
-                if name in gamma_dict:
-                    with torch.no_grad():
-                        module.gamma[style_id].copy_(gamma_dict[name])
-                        module.beta[style_id].copy_(beta_dict[name])

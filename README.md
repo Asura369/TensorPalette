@@ -56,7 +56,6 @@ graph LR
 | Input safety | 20MB upload cap, 33MP pixel limit, EXIF-aware, validated style params |
 | AMP training | fp16 autocast + GradScaler on T4 (~1.5x speedup) |
 | Async jobs | Large images (>1280px) processed via background queue |
-| ONNX export | Optional onnxruntime path for CPU inference |
 
 ---
 

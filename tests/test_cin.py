@@ -43,11 +43,3 @@ class TestCINTransformer:
             y0 = model(x, style_id=0)
             y1 = model(x, style_id=1)
         assert not torch.allclose(y0, y1, atol=1e-3)
-
-    def test_get_set_style_params(self):
-        model = CINTransformer(num_styles=2)
-        params = model.get_style_params(style_id=0)
-        assert len(params) > 0
-        for name, p in params.items():
-            assert "gamma" in p
-            assert "beta" in p
