@@ -9,3 +9,4 @@ style-weight: 1.0e9
 lr: 1.0e-3
 log-interval: 500
 checkpoint-interval: 2000
+val-fraction: 0.02

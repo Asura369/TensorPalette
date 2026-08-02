@@ -56,7 +56,7 @@ class AdaINDecoder(nn.Module):
 
 
 class AdaINModel(nn.Module):
-    def __init__(self, vgg_path="models/vgg16.pth"):
+    def __init__(self, vgg_path=None):
         super().__init__()
         self.encoder = Vgg16(requires_grad=True, vgg_path=vgg_path)
         for param in self.encoder.parameters():

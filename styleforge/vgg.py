@@ -6,15 +6,22 @@ from torchvision import models
 
 
 class Vgg16(torch.nn.Module):
-    def __init__(self, requires_grad=False, vgg_path="models/vgg16.pth"):
+    def __init__(self, requires_grad=False, vgg_path=None):
         super(Vgg16, self).__init__()
+
+        if vgg_path is None:
+            vgg_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "models", "vgg16.pth",
+            )
 
         vgg = models.vgg16(weights=None)
         if os.path.exists(vgg_path):
             print(f"[VGG16] Loading from local file: {vgg_path}")
             vgg.load_state_dict(torch.load(vgg_path, map_location='cpu', weights_only=True))
         else:
-            print("[VGG16] Local file not found, downloading pretrained weights...")
+            print("[VGG16] Local file not found, downloading pinned pretrained weights "
+                  "(https://download.pytorch.org/models/vgg16-397923af.pth)...")
             vgg = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
 
         vgg_pretrained_features = vgg.features
@@ -22,6 +29,7 @@ class Vgg16(torch.nn.Module):
         self.slice2 = torch.nn.Sequential()
         self.slice3 = torch.nn.Sequential()
         self.slice4 = torch.nn.Sequential()
+        self.slice5 = torch.nn.Sequential()
 
         for x in range(4):
             self.slice1.add_module(str(x), vgg_pretrained_features[x])
@@ -29,8 +37,10 @@ class Vgg16(torch.nn.Module):
             self.slice2.add_module(str(x), vgg_pretrained_features[x])
         for x in range(9, 16):
             self.slice3.add_module(str(x), vgg_pretrained_features[x])
-        for x in range(16, 23):
+        for x in range(16, 21):
             self.slice4.add_module(str(x), vgg_pretrained_features[x])
+        for x in range(21, 23):
+            self.slice5.add_module(str(x), vgg_pretrained_features[x])
 
         if not requires_grad:
             for param in self.parameters():
@@ -44,8 +54,10 @@ class Vgg16(torch.nn.Module):
         h = self.slice3(h)
         h_relu3_3 = h
         h = self.slice4(h)
+        h_relu4_2 = h
+        h = self.slice5(h)
         h_relu4_3 = h
 
-        vgg_outputs = namedtuple("VggOutputs", ['relu1_2', 'relu2_2', 'relu3_3', 'relu4_3'])
-        out = vgg_outputs(h_relu1_2, h_relu2_2, h_relu3_3, h_relu4_3)
+        vgg_outputs = namedtuple("VggOutputs", ['relu1_2', 'relu2_2', 'relu3_3', 'relu4_2', 'relu4_3'])
+        out = vgg_outputs(h_relu1_2, h_relu2_2, h_relu3_3, h_relu4_2, h_relu4_3)
         return out

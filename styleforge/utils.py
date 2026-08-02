@@ -1,19 +1,27 @@
 from PIL import Image
 
 
-def load_image(filename, size=None, scale=None):
+def load_image(filename, size=None):
     img = Image.open(filename).convert('RGB')
     if size is not None:
-        img = img.resize((size, size), Image.Resampling.LANCZOS)
-    elif scale is not None:
-        img = img.resize((int(img.size[0] / scale), int(img.size[1] / scale)), Image.Resampling.LANCZOS)
+        img = _resize_cover_center_crop(img, size)
     return img
 
-def save_image(filename, data):
-    img = data.clone().clamp(0, 255).numpy()
-    img = img.transpose(1, 2, 0).astype("uint8")
-    img = Image.fromarray(img)
-    img.save(filename)
+
+def _resize_cover_center_crop(img, size):
+    """Resize so the shorter side matches size, then center-crop a square.
+
+    Preserves aspect ratio (no distortion); crops painting edges equally on
+    both sides.
+    """
+    w, h = img.size
+    factor = max(size / w, size / h)
+    img = img.resize((int(round(w * factor)), int(round(h * factor))), Image.Resampling.LANCZOS)
+    w, h = img.size
+    left = (w - size) // 2
+    top = (h - size) // 2
+    return img.crop((left, top, left + size, top + size))
+
 
 def gram_matrix(y):
     (b, ch, h, w) = y.size()
@@ -22,13 +30,9 @@ def gram_matrix(y):
     gram = features.bmm(features_t) / (ch * h * w)
     return gram
 
+
 def normalize_batch(batch):
     mean = batch.new_tensor([0.485, 0.456, 0.406]).view(-1, 1, 1)
     std = batch.new_tensor([0.229, 0.224, 0.225]).view(-1, 1, 1)
     batch = batch.div(255.0)
     return (batch - mean) / std
-
-def denormalize_batch(batch):
-    mean = batch.new_tensor([0.485, 0.456, 0.406]).view(-1, 1, 1)
-    std = batch.new_tensor([0.229, 0.224, 0.225]).view(-1, 1, 1)
-    return (batch * std + mean) * 255.0

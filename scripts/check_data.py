@@ -75,8 +75,9 @@ def check_data(directory, delete=False):
     else:
         print(f"Files flagged for deletion: {deleted_count}")
     print(f"Valid RGB JPG images found: {valid_count}")
+    return valid_count, deleted_count
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Scan directory for invalid images.")
     parser.add_argument(
         "directory",
@@ -85,6 +86,12 @@ if __name__ == "__main__":
         help="Directory to scan (default: training_content)"
     )
     parser.add_argument("--delete", action="store_true", help="Actually delete invalid files (default: False)")
+    parser.add_argument(
+        "--min-valid",
+        type=int,
+        default=1,
+        help="Minimum valid images required for exit code 0 (default: 1)"
+    )
 
     args = parser.parse_args()
 
@@ -92,4 +99,12 @@ if __name__ == "__main__":
         print(f"Directory '{args.directory}' not found.")
         sys.exit(1)
 
-    check_data(args.directory, delete=args.delete)
+    valid_count, _ = check_data(args.directory, delete=args.delete)
+    if valid_count < args.min_valid:
+        print(f"ERROR: only {valid_count} valid images found, minimum required is {args.min_valid}",
+              file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

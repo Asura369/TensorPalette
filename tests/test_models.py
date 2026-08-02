@@ -8,10 +8,17 @@ from styleforge.cin import CINTransformer
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
 
 
-def test_cin_model_load_and_infer():
-    path = os.path.join(MODEL_DIR, "multistyle.pth")
+def require_model_path(name):
+    path = os.path.join(MODEL_DIR, name)
     if not os.path.exists(path):
-        pytest.skip("CIN model file multistyle.pth not found")
+        if os.environ.get("STYLEFORGE_REQUIRE_MODEL") == "1":
+            pytest.fail(f"Model file {path} missing (required by STYLEFORGE_REQUIRE_MODEL)")
+        pytest.skip(f"CIN model file {name} not found")
+    return path
+
+
+def test_cin_model_load_and_infer():
+    path = require_model_path("multistyle.pth")
 
     model = CINTransformer(num_styles=5)
     state_dict = torch.load(path, map_location="cpu", weights_only=True)
@@ -28,9 +35,7 @@ def test_cin_model_load_and_infer():
 
 
 def test_cin_model_interpolation():
-    path = os.path.join(MODEL_DIR, "multistyle.pth")
-    if not os.path.exists(path):
-        pytest.skip("CIN model file multistyle.pth not found")
+    path = require_model_path("multistyle.pth")
 
     model = CINTransformer(num_styles=5)
     state_dict = torch.load(path, map_location="cpu", weights_only=True)

@@ -15,6 +15,14 @@ from styleforge import utils
 from styleforge.cin import CINTransformer
 from styleforge.vgg import Vgg16
 
+STYLE_LAYERS = ("relu1_2", "relu2_2", "relu3_3", "relu4_2")
+CONTENT_LAYERS = (("relu2_2", 1.0), ("relu4_2", 1.0))
+
+
+def _mul255(x):
+    """Scale [0,1] tensors to [0,255]; module-level so DataLoader can pickle it."""
+    return x.mul(255)
+
 
 def check_paths(args):
     for d in [args.save_model_dir]:
@@ -30,6 +38,8 @@ def save_loss_plot(hist, save_dir):
     plt.plot(hist["content"], label="Content")
     plt.plot(hist["style"], label="Style")
     plt.plot(hist["total"], label="Total", linestyle="--")
+    if hist.get("val_total") and any(v is not None for v in hist["val_total"]):
+        plt.plot(hist["val_total"], label="Val Total", linestyle=":")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
@@ -38,10 +48,79 @@ def save_loss_plot(hist, save_dir):
     plt.close()
 
 
+def content_loss(features_y, features_x, mse_loss, weight):
+    loss = 0.0
+    for layer_name, layer_weight in CONTENT_LAYERS:
+        loss += layer_weight * mse_loss(
+            getattr(features_y, layer_name), getattr(features_x, layer_name)
+        )
+    return loss * weight
+
+
+def style_loss(features_y, gram_style, mse_loss, n_batch, weight):
+    loss = 0.0
+    for layer_name, gm_s in zip(STYLE_LAYERS, gram_style):
+        gm_y = utils.gram_matrix(getattr(features_y, layer_name).float())
+        loss += mse_loss(gm_y, gm_s[:n_batch, :, :])
+    return loss * weight
+
+
+def split_dataset(dataset, val_fraction, seed):
+    """Deterministically split a dataset into train/val subsets by index."""
+    n = len(dataset)
+    n_val = int(round(n * val_fraction))
+    if n_val == 0:
+        return dataset, None
+    generator = torch.Generator().manual_seed(seed)
+    perm = torch.randperm(n, generator=generator).tolist()
+    val_indices = perm[:n_val]
+    val_set = set(val_indices)
+    train_indices = [i for i in range(n) if i not in val_set]
+    return Subset(dataset, train_indices), Subset(dataset, val_indices)
+
+
+def _config_snapshot(args):
+    keys = ("lr", "epochs", "batch_size", "content_weight", "style_weight",
+            "seed", "val_fraction", "image_size", "style_size")
+    return {k: getattr(args, k) for k in keys}
+
+
+def build_checkpoint(transformer, optimizer, scheduler, epoch, best_loss,
+                     patience_counter, best_state, history, args, batch_id=None):
+    """Full trainer state so training can resume from a checkpoint."""
+    rng_numpy = np.random.get_state()
+    ckpt = {
+        "model": transformer.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+        "epoch": epoch,
+        "best_loss": best_loss,
+        "patience": patience_counter,
+        "best_state": best_state,
+        "history": history,
+        "rng_torch": torch.get_rng_state(),
+        "rng_cuda": torch.cuda.get_rng_state() if args.cuda and torch.cuda.is_available() else None,
+        "rng_numpy": (rng_numpy[0], rng_numpy[1].tobytes(), rng_numpy[2], rng_numpy[3], rng_numpy[4]),
+        "args": _config_snapshot(args),
+    }
+    if batch_id is not None:
+        ckpt["batch"] = batch_id
+    return ckpt
+
+
+def restore_rng(ckpt, args):
+    torch.set_rng_state(ckpt["rng_torch"])
+    rng_numpy = ckpt["rng_numpy"]
+    arr = np.frombuffer(rng_numpy[1], dtype=np.uint32).copy()
+    np.random.set_state((rng_numpy[0], arr, rng_numpy[2], rng_numpy[3], rng_numpy[4]))
+    if ckpt.get("rng_cuda") is not None and args.cuda and torch.cuda.is_available():
+        torch.cuda.set_rng_state(ckpt["rng_cuda"])
+
+
 def load_style_images(style_image_paths, style_size, device):
     style_transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Lambda(lambda x: x.mul(255))
+        transforms.Lambda(_mul255)
     ])
     gram_styles = []
     for path in style_image_paths:
@@ -60,23 +139,34 @@ def train_cin(args):
     torch.manual_seed(args.seed)
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     transform = transforms.Compose([
         transforms.Resize(args.image_size + 32),
         transforms.RandomCrop(args.image_size),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Lambda(lambda x: x.mul(255))
+        transforms.Lambda(_mul255)
     ])
-    train_dataset = datasets.ImageFolder(args.dataset, transform)
+    dataset = datasets.ImageFolder(args.dataset, transform)
 
     if args.limit:
-        indices = range(min(len(train_dataset), args.limit))
-        train_dataset = Subset(train_dataset, indices)
-        print(f"[Setup] Limit Active: {len(train_dataset)} images")
+        dataset = Subset(dataset, range(min(len(dataset), args.limit)))
+        print(f"[Setup] Limit Active: {len(dataset)} images")
+
+    train_dataset, val_dataset = split_dataset(dataset, args.val_fraction, args.seed)
+    if val_dataset is not None:
+        print(f"[Setup] Train images: {len(train_dataset)}, Val images: {len(val_dataset)}")
+    else:
+        print("[Setup] No validation set (val-fraction 0) — early stopping will use training loss")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                               shuffle=True, num_workers=2, pin_memory=True, drop_last=True)
+    val_loader = None
+    if val_dataset is not None:
+        val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
+                                shuffle=False, num_workers=2, pin_memory=True)
     print(f"[Setup] Batches per epoch: {len(train_loader)}")
 
     num_styles = len(args.style_images)
@@ -89,6 +179,37 @@ def train_cin(args):
     vgg = Vgg16(requires_grad=False).to(device)
     scaler = torch.amp.GradScaler(enabled=args.amp)
 
+    start_epoch = 0
+    best_loss = float("inf")
+    patience_counter = 0
+    best_state = None
+    history = {"content": [], "style": [], "total": [], "val_total": []}
+
+    if args.resume:
+        if not os.path.exists(args.resume):
+            raise FileNotFoundError(f"Resume checkpoint not found: {args.resume}")
+        ckpt = torch.load(args.resume, map_location=device, weights_only=True)
+        if "model" not in ckpt or "optimizer" not in ckpt:
+            raise ValueError(
+                f"{args.resume} is not a full trainer checkpoint (older checkpoints "
+                "saved state_dict only and cannot be resumed)."
+            )
+        transformer.load_state_dict(ckpt["model"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        scheduler.load_state_dict(ckpt["scheduler"])
+        start_epoch = ckpt["epoch"] + 1
+        best_loss = ckpt["best_loss"]
+        patience_counter = ckpt["patience"]
+        best_state = ckpt["best_state"]
+        history = ckpt["history"]
+        restore_rng(ckpt, args)
+        for k, v in ckpt.get("args", {}).items():
+            current = getattr(args, k, None)
+            if current != v:
+                print(f"[Resume] WARNING: saved {k}={v} differs from current {k}={current}")
+        print(f"[Resume] Resuming from epoch {start_epoch + 1}/{args.epochs} "
+              f"(best_loss={best_loss:.2f})")
+
     style_size = args.style_size or 512
     style_images = load_style_images(args.style_images, style_size, device)
 
@@ -96,17 +217,14 @@ def train_cin(args):
     for s_img in style_images:
         s_batch = s_img.repeat(args.batch_size, 1, 1, 1)
         feats = vgg(utils.normalize_batch(s_batch))
-        grams = [utils.gram_matrix(f) for f in feats]
+        grams = [utils.gram_matrix(getattr(feats, layer_name)) for layer_name in STYLE_LAYERS]
         features_style_list.append(grams)
 
-    history = {"content": [], "style": [], "total": []}
-    best_loss = float("inf")
-    patience_counter = 0
     PATIENCE_LIMIT = 3
 
     print(f"[Training] Starting CIN training for {args.epochs} epochs, AMP={args.amp}...")
 
-    for e in range(args.epochs):
+    for e in range(start_epoch, args.epochs):
         transformer.train()
         agg_content = 0.
         agg_style = 0.
@@ -134,28 +252,19 @@ def train_cin(args):
                 features_y = vgg(y_norm)
                 features_x = vgg(x_norm)
 
-                content_loss = 0.
-                for layer_name, weight in [("relu2_2", 1.0), ("relu4_2", 1.0)]:
-                    feat_y = getattr(features_y, layer_name)
-                    feat_x = getattr(features_x, layer_name)
-                    content_loss += weight * mse_loss(feat_y, feat_x)
-                content_loss *= args.content_weight
+                # Compute style loss in fp32 outside autocast to prevent overflow
+                c_loss = content_loss(features_y, features_x, mse_loss, args.content_weight)
 
-            # Compute style loss in fp32 outside autocast to prevent overflow
-            style_loss = 0.
-            for ft_y, gm_s in zip(features_y, gram_style):
-                gm_y = utils.gram_matrix(ft_y.float())
-                style_loss += mse_loss(gm_y, gm_s[:n_batch, :, :])
-            style_loss *= args.style_weight
+            s_loss = style_loss(features_y, gram_style, mse_loss, n_batch, args.style_weight)
 
-            total_loss = content_loss + style_loss
+            total_loss = c_loss + s_loss
 
             scaler.scale(total_loss).backward()
             scaler.step(optimizer)
             scaler.update()
 
-            agg_content += content_loss.item()
-            agg_style += style_loss.item()
+            agg_content += c_loss.item()
+            agg_style += s_loss.item()
             agg_total += total_loss.item()
 
             if (batch_id + 1) % args.log_interval == 0:
@@ -171,7 +280,10 @@ def train_cin(args):
                         args.checkpoint_model_dir,
                         f"cin_ckpt_e{e+1}_b{batch_id+1}.pth"
                     )
-                    torch.save(transformer.state_dict(), ckpt_path)
+                    torch.save(build_checkpoint(
+                        transformer, optimizer, scheduler, e, best_loss,
+                        patience_counter, best_state, history, args,
+                        batch_id=batch_id + 1), ckpt_path)
 
         epoch_content = agg_content / len(train_loader)
         epoch_style = agg_style / len(train_loader)
@@ -183,18 +295,56 @@ def train_cin(args):
 
         print(f"\n[Stats] Epoch {e+1} Avg Loss: {epoch_total:.2f}")
 
+        epoch_val_total = None
+        if val_loader is not None:
+            transformer.eval()
+            agg_val_content = 0.
+            agg_val_style = 0.
+            agg_val_total = 0.
+            with torch.no_grad():
+                for x, _ in val_loader:
+                    n_batch = len(x)
+                    x = x.to(device)
+                    style_id = random.randint(0, num_styles - 1)
+                    gram_style = features_style_list[style_id]
+                    style_ids = torch.tensor([style_id] * n_batch, device=device)
+                    y = transformer(x, style_ids)
+                    y_norm = utils.normalize_batch(y)
+                    x_norm = utils.normalize_batch(x)
+                    features_y = vgg(y_norm)
+                    features_x = vgg(x_norm)
+                    v_c = content_loss(features_y, features_x, mse_loss, args.content_weight)
+                    v_s = style_loss(features_y, gram_style, mse_loss, n_batch, args.style_weight)
+                    agg_val_content += v_c.item()
+                    agg_val_style += v_s.item()
+                    agg_val_total += (v_c + v_s).item()
+            transformer.train()
+            n_val = max(len(val_loader), 1)
+            epoch_val_total = agg_val_total / n_val
+            history["val_total"].append(epoch_val_total)
+            print(f"[Val] Epoch {e+1} Avg Val Loss: {epoch_val_total:.2f} "
+                  f"(C: {agg_val_content / n_val:.2f} S: {agg_val_style / n_val:.2f})")
+        else:
+            history["val_total"].append(None)
+
         scheduler.step()
 
         if args.checkpoint_model_dir:
             ckpt_path = os.path.join(args.checkpoint_model_dir, f"cin_ckpt_epoch_{e}.pth")
-            torch.save(transformer.state_dict(), ckpt_path)
+            torch.save(build_checkpoint(
+                transformer, optimizer, scheduler, e, best_loss,
+                patience_counter, best_state, history, args), ckpt_path)
 
-        if best_loss != float("inf") and epoch_total >= best_loss * (1 - 0.01):
+        signal = epoch_val_total if epoch_val_total is not None else epoch_total
+        signal_name = "val" if epoch_val_total is not None else "train"
+        if best_loss != float("inf") and signal >= best_loss * (1 - 0.01):
             patience_counter += 1
-            print(f"Loss plateaued. Patience: {patience_counter}/{PATIENCE_LIMIT}")
+            print(f"Loss plateaued ({signal_name}). Patience: {patience_counter}/{PATIENCE_LIMIT}")
         else:
-            best_loss = epoch_total
+            best_loss = signal
             patience_counter = 0
+            best_state = {k: v.detach().cpu().clone() for k, v in transformer.state_dict().items()}
+            print(f"[Best] New best {signal_name} loss: {best_loss:.2f}")
 
         if patience_counter >= PATIENCE_LIMIT:
             print("Early stopping triggered!")
@@ -206,9 +356,20 @@ def train_cin(args):
     name = args.save_model_name or f"cin_epoch_{args.epochs}.pth"
     if not name.endswith(".pth"):
         name += ".pth"
-    save_path = os.path.join(args.save_model_dir, name)
-    torch.save(transformer.state_dict(), save_path)
-    print(f"Model saved: {save_path}")
+
+    if best_state is not None:
+        best_path = os.path.join(args.save_model_dir, name)
+        torch.save(best_state, best_path)
+        print(f"Best model saved: {best_path}")
+    else:
+        best_path = os.path.join(args.save_model_dir, name)
+        torch.save(transformer.state_dict(), best_path)
+        print(f"Model saved: {best_path}")
+
+    stem, ext = os.path.splitext(name)
+    last_path = os.path.join(args.save_model_dir, f"{stem}_last{ext}")
+    torch.save(transformer.state_dict(), last_path)
+    print(f"Final-epoch model saved: {last_path}")
 
     save_loss_plot(history, args.save_model_dir)
     print(f"Loss plot saved: {os.path.join(args.save_model_dir, 'cin_loss_plot.png')}")
@@ -239,6 +400,10 @@ def main():
     cin_parser.add_argument("--lr", type=float, default=None)
     cin_parser.add_argument("--log-interval", type=int, default=None)
     cin_parser.add_argument("--limit", type=int, default=None)
+    cin_parser.add_argument("--val-fraction", type=float, default=None,
+                            help="Fraction of the dataset held out for validation (default: 0.02)")
+    cin_parser.add_argument("--resume", type=str, default=None,
+                            help="Path to a full trainer checkpoint to resume from")
 
     args = parser.parse_args()
 
@@ -262,6 +427,8 @@ def main():
             "lr": 1e-3,
             "log_interval": 500,
             "limit": None,
+            "val_fraction": 0.02,
+            "resume": None,
         }
 
         if args.config:
