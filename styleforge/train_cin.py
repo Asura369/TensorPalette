@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import yaml
+from PIL import Image
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
@@ -22,6 +23,39 @@ CONTENT_LAYERS = (("relu2_2", 1.0), ("relu4_2", 1.0))
 def _mul255(x):
     """Scale [0,1] tensors to [0,255]; module-level so DataLoader can pickle it."""
     return x.mul(255)
+
+
+class _AugmentSubset(torch.utils.data.Dataset):
+    """Applies augmentation seeded deterministically by dataset index.
+
+    Multi-worker DataLoaders race on the index queue, which makes worker-local
+    RNG nondeterministic across runs. Seeding the stochastic ops from the
+    dataset index keeps training bit-reproducible regardless of worker
+    assignment. Val uses CenterCrop (no randomness).
+    """
+
+    def __init__(self, dataset, image_size, train):
+        self.dataset = dataset
+        self.image_size = image_size
+        self.train = train
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        img, label = self.dataset[idx]
+        generator = torch.Generator().manual_seed(idx)
+        img = transforms.Resize(self.image_size + 32)(img)
+        if self.train:
+            offset = 32
+            top = int(torch.randint(0, offset + 1, (1,), generator=generator))
+            left = int(torch.randint(0, offset + 1, (1,), generator=generator))
+            img = img.crop((left, top, left + self.image_size, top + self.image_size))
+            if bool(torch.randint(0, 2, (1,), generator=generator)):
+                img = img.transpose(Image.FLIP_LEFT_RIGHT)
+        else:
+            img = transforms.CenterCrop(self.image_size)(img)
+        return _mul255(transforms.ToTensor()(img)), label
 
 
 def check_paths(args):
@@ -81,7 +115,9 @@ def split_dataset(dataset, val_fraction, seed):
 
 def _config_snapshot(args):
     keys = ("lr", "epochs", "batch_size", "content_weight", "style_weight",
-            "seed", "val_fraction", "image_size", "style_size")
+            "seed", "val_fraction", "image_size", "style_size", "dataset",
+            "style_images", "limit", "amp", "cuda", "checkpoint_interval",
+            "log_interval", "patience")
     return {k: getattr(args, k) for k in keys}
 
 
@@ -136,27 +172,23 @@ def train_cin(args):
     print(f"[Setup] Device: {device}")
 
     np.random.seed(args.seed)
+    random.seed(args.seed)
     torch.manual_seed(args.seed)
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    transform = transforms.Compose([
-        transforms.Resize(args.image_size + 32),
-        transforms.RandomCrop(args.image_size),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Lambda(_mul255)
-    ])
-    dataset = datasets.ImageFolder(args.dataset, transform)
+    dataset = datasets.ImageFolder(args.dataset)
 
     if args.limit:
         dataset = Subset(dataset, range(min(len(dataset), args.limit)))
         print(f"[Setup] Limit Active: {len(dataset)} images")
 
     train_dataset, val_dataset = split_dataset(dataset, args.val_fraction, args.seed)
+    train_dataset = _AugmentSubset(train_dataset, args.image_size, train=True)
     if val_dataset is not None:
+        val_dataset = _AugmentSubset(val_dataset, args.image_size, train=False)
         print(f"[Setup] Train images: {len(train_dataset)}, Val images: {len(val_dataset)}")
     else:
         print("[Setup] No validation set (val-fraction 0) — early stopping will use training loss")
@@ -167,6 +199,11 @@ def train_cin(args):
     if val_dataset is not None:
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
                                 shuffle=False, num_workers=2, pin_memory=True)
+    if len(train_loader) == 0:
+        raise ValueError(
+            f"Training set empty after drop_last (batch-size {args.batch_size}, "
+            f"val-fraction {args.val_fraction}) — reduce --batch-size or --val-fraction"
+        )
     print(f"[Setup] Batches per epoch: {len(train_loader)}")
 
     num_styles = len(args.style_images)
@@ -220,7 +257,7 @@ def train_cin(args):
         grams = [utils.gram_matrix(getattr(feats, layer_name)) for layer_name in STYLE_LAYERS]
         features_style_list.append(grams)
 
-    PATIENCE_LIMIT = 3
+    patience_limit = args.patience
 
     print(f"[Training] Starting CIN training for {args.epochs} epochs, AMP={args.amp}...")
 
@@ -302,10 +339,12 @@ def train_cin(args):
             agg_val_style = 0.
             agg_val_total = 0.
             with torch.no_grad():
-                for x, _ in val_loader:
+                for val_batch_id, (x, _) in enumerate(val_loader):
                     n_batch = len(x)
                     x = x.to(device)
-                    style_id = random.randint(0, num_styles - 1)
+                    # Deterministic per-batch style cycle so val loss is
+                    # comparable across epochs (early stopping not style-noise driven)
+                    style_id = val_batch_id % num_styles
                     gram_style = features_style_list[style_id]
                     style_ids = torch.tensor([style_id] * n_batch, device=device)
                     y = transformer(x, style_ids)
@@ -339,14 +378,14 @@ def train_cin(args):
         signal_name = "val" if epoch_val_total is not None else "train"
         if best_loss != float("inf") and signal >= best_loss * (1 - 0.01):
             patience_counter += 1
-            print(f"Loss plateaued ({signal_name}). Patience: {patience_counter}/{PATIENCE_LIMIT}")
+            print(f"Loss plateaued ({signal_name}). Patience: {patience_counter}/{patience_limit}")
         else:
             best_loss = signal
             patience_counter = 0
             best_state = {k: v.detach().cpu().clone() for k, v in transformer.state_dict().items()}
             print(f"[Best] New best {signal_name} loss: {best_loss:.2f}")
 
-        if patience_counter >= PATIENCE_LIMIT:
+        if patience_counter >= patience_limit:
             print("Early stopping triggered!")
             break
 
@@ -402,6 +441,8 @@ def main():
     cin_parser.add_argument("--limit", type=int, default=None)
     cin_parser.add_argument("--val-fraction", type=float, default=None,
                             help="Fraction of the dataset held out for validation (default: 0.02)")
+    cin_parser.add_argument("--patience", type=int, default=None,
+                            help="Early-stopping patience in epochs (default: 3)")
     cin_parser.add_argument("--resume", type=str, default=None,
                             help="Path to a full trainer checkpoint to resume from")
 
@@ -428,6 +469,7 @@ def main():
             "log_interval": 500,
             "limit": None,
             "val_fraction": 0.02,
+            "patience": 3,
             "resume": None,
         }
 
@@ -456,9 +498,17 @@ def main():
             parser.error("--save-model-dir is required")
         if not args.style_images or len(args.style_images) < 2:
             parser.error("--style-images requires at least 2 comma-separated paths")
+        if not (0.0 <= args.val_fraction < 1.0):
+            parser.error("--val-fraction must be in [0, 1)")
+        if args.patience < 1:
+            parser.error("--patience must be >= 1")
 
         args.amp = bool(args.amp)
         args.cuda = bool(args.cuda)
+        if args.cuda and not torch.cuda.is_available():
+            print("[Setup] WARNING: --cuda 1 but no CUDA device found; "
+                  "falling back to CPU (pass --cuda 0 to silence)")
+            args.cuda = False
 
         check_paths(args)
         train_cin(args)

@@ -31,8 +31,8 @@ graph TD
     L --> P[evaluate.py: latency + quality]
 ```
 
-**Expected run characteristics** (T4 GPU): ~30–45 min, loss ~1e10 → ~1e8,
-model ~6MB.
+**Expected run characteristics** (per README, empirical — T4 GPU, 5 curated
+styles, full COCO): ~30–45 min, loss ~1e10 → ~1e8, model ~6MB.
 
 **Entry points**
 
@@ -52,6 +52,9 @@ model ~6MB.
   `Vgg16` downloads the pinned torchvision weights
   (`vgg16-397923af.pth`) — vendor the file locally for offline/reproducible runs.
 - **Style images:** ≥2 JPEGs (5 curated in `styles/`, listed in `styles/catalog.yaml`).
+
+If `--cuda 1` is set but no CUDA device exists, training warns and falls back
+to CPU (pass `--cuda 0` to silence).
 
 ---
 
@@ -77,15 +80,22 @@ and non-RGB images. Dry run by default; `--delete` removes flagged files.
 
 ### 3.3 Content transforms (`train_cin.py`)
 
-Applied in order:
+Applied lazily per split (`_AugmentSubset`): **train** gets the stochastic
+augmentation below; **val** gets a deterministic `Resize(+32) → CenterCrop →
+ToTensor → ×255` (no random crop/flip), so val loss is reproducible and
+comparable across epochs. All stochastic ops are seeded from the dataset
+index — multi-worker loaders race on the index queue, so worker-local RNG
+would otherwise be nondeterministic across runs.
+
+Train ops, in order:
 
 | Op | Purpose |
 |---|---|
 | `Resize(image_size + 32)` | Scale up so crops vary (256 → 288) |
-| `RandomCrop(image_size)` | Spatial augmentation, fixed input size |
-| `RandomHorizontalFlip` | Geometric augmentation |
+| `RandomCrop(image_size)` (index-seeded) | Spatial augmentation, fixed input size |
+| `RandomHorizontalFlip` (index-seeded) | Geometric augmentation |
 | `ToTensor()` | HWC uint8 → CHW float [0,1] |
-| `Lambda(_mul255)` | Scale to [0,255] — module-level fn so DataLoader can pickle it |
+| `×255` (`_mul255`) | Scale to [0,255] — module-level fn so DataLoader can pickle it |
 
 > ⚠ The pipeline is consistently **[0,255]**: training transform, style
 > preprocessing, inference (`engine.py`), and VGG normalization
@@ -175,7 +185,9 @@ honored. `cuda`/`amp` are coerced with `bool()`. Required: `--dataset`,
 
 ### 5.2 Parameters
 
-Defaults from `configs/default.yaml`:
+Defaults shown below; precedence CLI > YAML > built-in defaults. `amp` is not
+present in `configs/default.yaml` but any default key is honored if added
+there.
 
 | Config key | CLI flag | Default | Meaning |
 |---|---|---|---|
@@ -184,14 +196,15 @@ Defaults from `configs/default.yaml`:
 | `image-size` | `--image-size` | 256 | Content crop size |
 | `style-size` | `--style-size` | 512 | Style image square size |
 | `cuda` | `--cuda` | 1 | Use CUDA |
-| `amp` | `--amp` | 1 | fp16 autocast (CUDA only) |
+| `amp` | `--amp` | 1 | fp16 autocast (CUDA only; not in default YAML) |
 | `seed` | `--seed` | 42 | RNG seed (training + val split) |
 | `content-weight` | `--content-weight` | 1.0e5 | Content loss scale |
 | `style-weight` | `--style-weight` | 1.0e9 | Style loss scale |
 | `lr` | `--lr` | 1.0e-3 | Adam learning rate |
 | `log-interval` | `--log-interval` | 500 | Batches between loss prints |
 | `checkpoint-interval` | `--checkpoint-interval` | 2000 | Batches between intra-epoch checkpoints |
-| `val-fraction` | `--val-fraction` | 0.02 | Held out for validation |
+| `val-fraction` | `--val-fraction` | 0.02 | Held out for validation (must be in [0, 1)) |
+| `patience` | `--patience` | 3 | Early-stopping patience in epochs |
 | — | `--limit` | None | Truncate dataset (smoke tests only) |
 | — | `--resume` | None | Full trainer checkpoint to resume from |
 | — | `--checkpoint-model-dir` | None | Checkpoint directory; None disables |
@@ -199,9 +212,12 @@ Defaults from `configs/default.yaml`:
 
 ### 5.3 Determinism
 
-Seeds numpy/torch/CUDA with `--seed` and sets `cudnn.deterministic = True`,
-`cudnn.benchmark = False` for bit-exact runs. The val split uses a dedicated
-`torch.Generator` seeded from `--seed`.
+Seeds numpy, Python `random`, torch, and CUDA with `--seed`; sets
+`cudnn.deterministic = True` / `cudnn.benchmark = False` for bit-exact runs.
+The val split uses a dedicated `torch.Generator` seeded from `--seed`, and
+augmentation is seeded from the dataset index (§3.3) so multi-worker data
+loading is reproducible run-to-run. Verified: two identical runs with the
+same seed produce identical training and val losses.
 
 ### 5.4 Per-step flow
 
@@ -220,10 +236,10 @@ No gradient clipping or weight decay. AMP requires `--amp 1` **and** `--cuda 1`.
 ### 5.5 LR schedule & early stopping
 
 - `CosineAnnealingLR(optimizer, T_max=epochs)`, stepped once per epoch.
-- Early stopping: patience 3 on the **signal** — val total loss when a val set
-  exists (default), else training total. No improvement below
-  `best_loss * (1 - 0.01)` (1% relative) increments patience; 3 consecutive
-  plateaus stop training.
+- Early stopping: patience (`--patience`, default 3) on the **signal** — val
+  total loss when a val set exists (default), else training total. No
+  improvement below `best_loss * (1 - 0.01)` (1% relative, fixed) increments
+  patience; `patience` consecutive plateaus stop training.
 - ⚠ Early stop before `epochs` ends the cosine schedule mid-anneal (LR saved
   non-zero).
 
@@ -238,10 +254,12 @@ No gradient clipping or weight decay. AMP requires `--amp 1` **and** `--cuda 1`.
 | Loss plot | end of training | `--save-model-dir` | `cin_loss_plot.png` (incl. val-total) |
 
 `build_checkpoint` saves model, optimizer, scheduler, epoch, best loss,
-patience, best weights, history, and RNG states — so `--resume <ckpt>`
+patience, best weights, history, RNG states, and a full config snapshot
+(hyperparameters, dataset, style images, limit, amp/cuda) — so `--resume <ckpt>`
 continues at the saved epoch + 1. Old `state_dict`-only checkpoints are
-rejected with an error; resuming with different hyperparameters warns per
-mismatched setting.
+rejected with an error; resuming with different settings (including a
+different `--dataset`/`--style-images`/`--seed`/`--limit`, which would change
+the seeded val split) warns per mismatched setting.
 
 ---
 
@@ -252,7 +270,11 @@ On by default (`val-fraction 0.02`):
 - Deterministic per-run seeded split — no separate download; `--limit` applies
   before the split, so small smoke runs get no val set (N × 0.02 rounds to 0).
 - Each epoch, after training, the val set runs under `torch.no_grad()` and
-  reports `[Val]` content/style/total loss.
+  reports `[Val]` content/style/total loss. Val inputs are fully
+  deterministic: the val transform uses `CenterCrop` (no random crop/flip,
+  see §3.3) and val styles use a fixed per-batch cycle
+  (`batch_index % num_styles`) — so the val signal is reproducible across
+  runs and early stopping is not driven by sampling noise.
 - Early stopping and best-model selection use val loss; `--val-fraction 0`
   falls back to training loss.
 - Loss plot includes the val-total curve.
@@ -272,10 +294,10 @@ cannot detect style bleeding or broken γ/β.
 | `test_vgg.py` | `relu4_2` + `relu4_3` presence (training-crash regression) |
 | `test_check_data.py` | Scan counts, `--delete`, exit below `--min-valid` |
 | `test_train_cin.py` | `split_dataset` determinism + disjointness |
-| `test_cin.py` | CIN block shapes, style distinctness, γ/β get/set |
+| `test_cin.py` | CIN block shapes, style distinctness |
 | `test_engine.py` | Stylize paths, interpolation, tiling dispatch |
 | `test_tiling.py` | Blend weights, large-image approx-identity |
-| `test_utils.py` | Gram math, normalize round-trip |
+| `test_utils.py` | Gram math, normalize scaling |
 | `test_server.py` | API edge cases, EXIF, async jobs |
 
 Model-dependent tests skip with a message when `models/` weights are missing;
@@ -287,6 +309,7 @@ set `STYLEFORGE_REQUIRE_MODEL=1` to turn skips into failures (CI strict mode).
 - **Quality** (`--images-dir <heldout>`, `--max-images`): unscaled mean
   content loss and per-style style loss over `STYLE_LAYERS` (reuses the
   training loss helpers).
+- Device selection matches the engine (cuda → mps → cpu, `pick_device`).
 - Writes `docs/benchmarks.md`.
 
 ### 7.3 Inference consistency — `styleforge/engine.py`
@@ -294,7 +317,7 @@ set `STYLEFORGE_REQUIRE_MODEL=1` to turn skips into failures (CI strict mode).
 - Device: cuda → mps → cpu; model loads with `weights_only=True`.
 - Content transform matches training (`ToTensor` + ×255).
 - Images > `TILE_THRESHOLD` (1280px) are processed via overlapping 512px tiles
-  with linear blending (`styleforge/tiling.py`).
+  (64px overlap) with linear blending (`styleforge/tiling.py`).
 
 ---
 
@@ -318,6 +341,7 @@ python -m styleforge.train_cin cin \
     --cuda 0 --amp 0 --epochs 1 --limit 8 --batch-size 4
 
 # Resume from a checkpoint (continues at saved epoch + 1)
+# --epochs: original total (or more to extend); a mismatch prints a warning
 python -m styleforge.train_cin cin \
     --dataset training_content \
     --style-images styles/starry_night.jpg,styles/great_wave.jpg \
@@ -343,5 +367,6 @@ python scripts/evaluate.py --cin-model models/multistyle.pth --num-styles 5 \
 ## 9. Current Limitations
 
 - No visual validation grid during training (see §6).
-- Checkpoints carry no experiment provenance (commit hash, dataset version).
+- Checkpoints store a full config snapshot (incl. dataset/style paths) but not
+  commit hash or dataset version.
 - DataLoader worker count, pinning, and `drop_last` are hardcoded (see §3.4).

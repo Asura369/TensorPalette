@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 
-from styleforge.engine import InferenceEngine
+from styleforge.engine import InferenceEngine, pick_device
 
 
 def measure_latency(engine, model_name, style_id, sizes, device, runs=5):
@@ -123,7 +123,7 @@ def main():
     parser.add_argument("--max-images", type=int, default=32)
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     engine = InferenceEngine(device=device)
 
     lines = [
