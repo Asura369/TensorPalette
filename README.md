@@ -248,7 +248,9 @@ pytest tests/test_models.py -v
 ```
 
 **Expected output:**
-- Training takes ~30-45 minutes on a T4 GPU
+- Training runtime scales with GPU, batch size, and dataset size — benchmark
+  on your hardware. The Colab notebook uses `--batch-size 16` and writes
+  resumable checkpoints to survive session limits
 - Loss should decrease from ~1e10 to ~1e8
 - Model size: ~6MB
 - A validation split (default 2%) drives early stopping; checkpoints are

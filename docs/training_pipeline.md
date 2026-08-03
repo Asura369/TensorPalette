@@ -31,8 +31,10 @@ graph TD
     L --> P[evaluate.py: latency + quality]
 ```
 
-**Expected run characteristics** (per README, empirical — T4 GPU, 5 curated
-styles, full COCO): ~30–45 min, loss ~1e10 → ~1e8, model ~6MB.
+**Expected run characteristics:** loss drops ~1e10 → ~1e8, model ~6MB.
+Runtime is hardware-dependent (GPU, batch size) — benchmark on your own
+hardware; the Colab notebook uses `--batch-size 16` with resumable
+checkpoints to survive session limits.
 
 **Entry points**
 
@@ -349,7 +351,7 @@ python -m styleforge.train_cin cin \
     --cuda 0 --amp 0 --epochs 4 --limit 8 --batch-size 4 \
     --resume /tmp/cin-smoke/cin_ckpt_epoch_1.pth
 
-# Full training (T4 reference: ~30-45 min)
+# Full training (canonical defaults; runtime is hardware-dependent)
 python -m styleforge.train_cin cin \
     --dataset training_content \
     --style-images styles/starry_night.jpg,styles/great_wave.jpg,styles/girl_pearl.jpg,styles/composition_viii.jpg,styles/water_lilies.jpg \
