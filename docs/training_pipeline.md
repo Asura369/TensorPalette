@@ -33,8 +33,9 @@ graph TD
 
 **Expected run characteristics:** loss drops ~1e10 → ~1e8, model ~6MB.
 Runtime is hardware-dependent (GPU, batch size) — benchmark on your own
-hardware; the Colab notebook uses `--batch-size 16` with resumable
-checkpoints to survive session limits.
+hardware. The Colab notebook is tuned for an A100 80GB (`--batch-size 128`,
+8 workers, deterministic off) with resumable checkpoints; for a T4 use
+`--batch-size 32 --lr 3e-3 --num-workers 2`.
 
 **Entry points**
 
@@ -44,6 +45,18 @@ checkpoints to survive session limits.
 | Local CLI | `python -m styleforge.train_cin cin ...` |
 | Data scan | `python scripts/check_data.py training_content/` |
 | Verification | `pytest tests/ -v`; `python scripts/evaluate.py ...` |
+
+> Colab note: the notebook's training cell runs `python -u` so output streams,
+> and auto-resumes from the latest epoch checkpoint if one exists (survives
+> session disconnects). A single run-level progress bar shows overall progress
+> %, elapsed, remaining, rate, and live per-epoch losses/LR/images-per-second;
+> every `log-interval` batches a newline-terminated heartbeat line prints the
+> same metrics (renders even where `\r`-updates don't). Uncomment
+> `MINI_DATASET = True` in the download cell for a 5K-image test run (COCO
+> val2017, ~800MB) before large runs, and `EPOCHS = 1` in the training cell
+> for the quickest smoke. The COCO download is a one-time cost per session.
+> If the run is genuinely stalled before the first batch, restart with
+> `--num-workers 0`.
 
 ---
 
@@ -110,12 +123,13 @@ Train ops, in order:
 |---|---|---|
 | `batch_size` | 4 | `batch-size` / `--batch-size` |
 | `shuffle` | True | Hardcoded |
-| `num_workers` | 2 | Hardcoded |
+| `num_workers` | 2 | `num-workers` / `--num-workers` |
 | `pin_memory` | True | Hardcoded |
 | `drop_last` | True | Hardcoded (pairs with precomputed style grams) |
 
 `--limit N` truncates the dataset for smoke tests — never leave it on for a
-real run.
+real run. If DataLoader worker processes hang (a known fork-with-threads issue
+in some environments), retry with `--num-workers 0`.
 
 ### 3.5 Style image preprocessing
 
@@ -203,10 +217,12 @@ there.
 | `content-weight` | `--content-weight` | 1.0e5 | Content loss scale |
 | `style-weight` | `--style-weight` | 1.0e9 | Style loss scale |
 | `lr` | `--lr` | 1.0e-3 | Adam learning rate |
-| `log-interval` | `--log-interval` | 500 | Batches between loss prints |
+| `log-interval` | `--log-interval` | 500 | Batches between progress heartbeat lines |
 | `checkpoint-interval` | `--checkpoint-interval` | 2000 | Batches between intra-epoch checkpoints |
 | `val-fraction` | `--val-fraction` | 0.02 | Held out for validation (must be in [0, 1)) |
 | `patience` | `--patience` | 3 | Early-stopping patience in epochs |
+| `num-workers` | `--num-workers` | 2 | DataLoader worker processes (0 if workers hang) |
+| `deterministic` | `--deterministic` | 1 | cuDNN deterministic mode; 0 enables autotuning (faster, not bit-reproducible) |
 | — | `--limit` | None | Truncate dataset (smoke tests only) |
 | — | `--resume` | None | Full trainer checkpoint to resume from |
 | — | `--checkpoint-model-dir` | None | Checkpoint directory; None disables |
@@ -214,12 +230,15 @@ there.
 
 ### 5.3 Determinism
 
-Seeds numpy, Python `random`, torch, and CUDA with `--seed`; sets
-`cudnn.deterministic = True` / `cudnn.benchmark = False` for bit-exact runs.
-The val split uses a dedicated `torch.Generator` seeded from `--seed`, and
-augmentation is seeded from the dataset index (§3.3) so multi-worker data
-loading is reproducible run-to-run. Verified: two identical runs with the
-same seed produce identical training and val losses.
+Seeds numpy, Python `random`, torch, and CUDA with `--seed`; with
+`--deterministic 1` (default) sets `cudnn.deterministic = True` /
+`cudnn.benchmark = False` for bit-exact runs. `--deterministic 0` disables
+deterministic kernels and enables cuDNN autotuning — faster, especially on
+A100-class GPUs, but not bit-reproducible. The val split uses a dedicated
+`torch.Generator` seeded from `--seed`, and augmentation is seeded from the
+dataset index (§3.3) so multi-worker data loading is reproducible run-to-run.
+Verified: two identical runs with the same seed produce identical training
+and val losses.
 
 ### 5.4 Per-step flow
 
@@ -371,4 +390,4 @@ python scripts/evaluate.py --cin-model models/multistyle.pth --num-styles 5 \
 - No visual validation grid during training (see §6).
 - Checkpoints store a full config snapshot (incl. dataset/style paths) but not
   commit hash or dataset version.
-- DataLoader worker count, pinning, and `drop_last` are hardcoded (see §3.4).
+- DataLoader `pin_memory` and `drop_last` are hardcoded (see §3.4).

@@ -201,6 +201,7 @@ The frontend dev server proxies `/api` requests to `localhost:8000`.
    ```
    This creates a ~2.5MB zip containing:
    - `pyproject.toml` — package metadata
+   - `requirements.txt` — pinned dependencies (installed in cell 0)
    - `styleforge/` — Python package
    - `styles/` — 5 style images + catalog
    - `configs/` — training configuration
@@ -249,8 +250,9 @@ pytest tests/test_models.py -v
 
 **Expected output:**
 - Training runtime scales with GPU, batch size, and dataset size — benchmark
-  on your hardware. The Colab notebook uses `--batch-size 16` and writes
-  resumable checkpoints to survive session limits
+  on your hardware. The Colab notebook is tuned for an A100 80GB
+  (`--batch-size 128`, 8 workers) and writes resumable checkpoints to
+  survive session limits; for a T4 use `--batch-size 32 --lr 3e-3`
 - Loss should decrease from ~1e10 to ~1e8
 - Model size: ~6MB
 - A validation split (default 2%) drives early stopping; checkpoints are

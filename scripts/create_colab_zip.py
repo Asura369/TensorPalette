@@ -12,6 +12,7 @@ def create_colab_zip():
     # Files and directories to include
     includes = [
         "pyproject.toml",
+        "requirements.txt",
         "styleforge/",
         "styles/",
         "configs/",

@@ -1,6 +1,7 @@
 import argparse
 import os
 import random
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -117,7 +118,7 @@ def _config_snapshot(args):
     keys = ("lr", "epochs", "batch_size", "content_weight", "style_weight",
             "seed", "val_fraction", "image_size", "style_size", "dataset",
             "style_images", "limit", "amp", "cuda", "checkpoint_interval",
-            "log_interval", "patience")
+            "log_interval", "patience", "num_workers", "deterministic")
     return {k: getattr(args, k) for k in keys}
 
 
@@ -176,8 +177,8 @@ def train_cin(args):
     torch.manual_seed(args.seed)
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = args.deterministic
+    torch.backends.cudnn.benchmark = not args.deterministic
 
     dataset = datasets.ImageFolder(args.dataset)
 
@@ -194,11 +195,13 @@ def train_cin(args):
         print("[Setup] No validation set (val-fraction 0) — early stopping will use training loss")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
-                              shuffle=True, num_workers=2, pin_memory=True, drop_last=True)
+                              shuffle=True, num_workers=args.num_workers,
+                              pin_memory=True, drop_last=True)
     val_loader = None
     if val_dataset is not None:
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
-                                shuffle=False, num_workers=2, pin_memory=True)
+                                shuffle=False, num_workers=args.num_workers,
+                                pin_memory=True)
     if len(train_loader) == 0:
         raise ValueError(
             f"Training set empty after drop_last (batch-size {args.batch_size}, "
@@ -259,17 +262,29 @@ def train_cin(args):
 
     patience_limit = args.patience
 
+    batches_per_epoch = len(train_loader)
+    total_batches = batches_per_epoch * args.epochs
+    run_start = time.time()
+
     print(f"[Training] Starting CIN training for {args.epochs} epochs, AMP={args.amp}...")
+
+    run_iterator = tqdm(
+        total=total_batches,
+        desc=f"Epoch {start_epoch + 1}/{args.epochs}",
+        unit="batch",
+        leave=True,
+        mininterval=1.0,
+        smoothing=0.2,
+    )
 
     for e in range(start_epoch, args.epochs):
         transformer.train()
         agg_content = 0.
         agg_style = 0.
         agg_total = 0.
+        epoch_start = time.time()
 
-        batch_iterator = tqdm(train_loader, desc=f"Epoch {e+1}/{args.epochs}", unit="batch")
-
-        for batch_id, (x, _) in enumerate(batch_iterator):
+        for batch_id, (x, _) in enumerate(train_loader):
             n_batch = len(x)
             x = x.to(device)
 
@@ -304,12 +319,32 @@ def train_cin(args):
             agg_style += s_loss.item()
             agg_total += total_loss.item()
 
-            if (batch_id + 1) % args.log_interval == 0:
-                mesg = "C: {:.2f} S: {:.2f}".format(
-                    agg_content / (batch_id + 1),
-                    agg_style / (batch_id + 1)
+            done = batch_id + 1
+            run_iterator.update(1)
+            run_iterator.set_description(f"Epoch {e+1}/{args.epochs}")
+            run_elapsed = max(time.time() - run_start, 1e-9)
+            run_rate = run_iterator.n / run_elapsed
+            run_iterator.set_postfix({
+                "batch": f"{done}/{batches_per_epoch}",
+                "C": f"{agg_content / done:.2e}",
+                "S": f"{agg_style / done:.2e}",
+                "T": f"{agg_total / done:.2e}",
+                "lr": f"{scheduler.get_last_lr()[0]:.2e}",
+                "img/s": f"{run_rate * args.batch_size:.0f}",
+            })
+
+            if done % args.log_interval == 0:
+                epoch_elapsed = time.time() - epoch_start
+                epoch_rate = done / epoch_elapsed if epoch_elapsed > 0 else 0.0
+                remaining = ((batches_per_epoch - done) / epoch_rate
+                             if epoch_rate > 0 else float("inf"))
+                print(
+                    f"[Epoch {e+1}/{args.epochs}] batch {done}/{batches_per_epoch} "
+                    f"| C: {agg_content / done:.2e} S: {agg_style / done:.2e} "
+                    f"T: {agg_total / done:.2e} | lr: {scheduler.get_last_lr()[0]:.2e} "
+                    f"| {epoch_rate:.1f} it/s | ETA {remaining / 60:.1f} min",
+                    flush=True,
                 )
-                batch_iterator.set_description(f"Epoch {e+1} [{mesg}]")
 
             if args.checkpoint_interval and (batch_id + 1) % args.checkpoint_interval == 0:
                 if args.checkpoint_model_dir:
@@ -330,7 +365,8 @@ def train_cin(args):
         history["style"].append(epoch_style)
         history["total"].append(epoch_total)
 
-        print(f"\n[Stats] Epoch {e+1} Avg Loss: {epoch_total:.2f}")
+        print(f"\n[Stats] Epoch {e+1} Avg Loss: {epoch_total:.2f} "
+              f"({time.time() - epoch_start:.0f}s)")
 
         epoch_val_total = None
         if val_loader is not None:
@@ -339,7 +375,11 @@ def train_cin(args):
             agg_val_style = 0.
             agg_val_total = 0.
             with torch.no_grad():
-                for val_batch_id, (x, _) in enumerate(val_loader):
+                val_iterator = tqdm(
+                    val_loader, desc=f"[Val] Epoch {e+1}", unit="batch",
+                    leave=False, mininterval=1.0,
+                )
+                for val_batch_id, (x, _) in enumerate(val_iterator):
                     n_batch = len(x)
                     x = x.to(device)
                     # Deterministic per-batch style cycle so val loss is
@@ -388,6 +428,8 @@ def train_cin(args):
         if patience_counter >= patience_limit:
             print("Early stopping triggered!")
             break
+
+    run_iterator.close()
 
     print("\n[COMPLETE] Saving CIN model and graphs...")
     transformer.eval().cpu()
@@ -443,6 +485,10 @@ def main():
                             help="Fraction of the dataset held out for validation (default: 0.02)")
     cin_parser.add_argument("--patience", type=int, default=None,
                             help="Early-stopping patience in epochs (default: 3)")
+    cin_parser.add_argument("--num-workers", type=int, default=None,
+                            help="DataLoader worker processes (default: 2; 0 if workers hang)")
+    cin_parser.add_argument("--deterministic", type=int, default=None,
+                            help="cuDNN deterministic mode (1=on, 0=off; off enables autotuning and is faster)")
     cin_parser.add_argument("--resume", type=str, default=None,
                             help="Path to a full trainer checkpoint to resume from")
 
@@ -470,6 +516,8 @@ def main():
             "limit": None,
             "val_fraction": 0.02,
             "patience": 3,
+            "num_workers": 2,
+            "deterministic": 1,
             "resume": None,
         }
 
@@ -505,6 +553,7 @@ def main():
 
         args.amp = bool(args.amp)
         args.cuda = bool(args.cuda)
+        args.deterministic = bool(args.deterministic)
         if args.cuda and not torch.cuda.is_available():
             print("[Setup] WARNING: --cuda 1 but no CUDA device found; "
                   "falling back to CPU (pass --cuda 0 to silence)")
