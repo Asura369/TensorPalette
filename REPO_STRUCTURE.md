@@ -47,22 +47,29 @@ StyleForge/
 ├── configs/                    # Training hyperparameters
 │   └── default.yaml            # Default CIN training config
 │
+├── docs/                       # Documentation
+│   └── training_pipeline.md    # Training pipeline reference
+│
 ├── scripts/                    # Utility scripts
-│   ├── evaluate.py             # Benchmark harness → docs/benchmarks.md
-│   └── check_data.py           # Validate training dataset integrity
+│   ├── check_data.py           # Validate training dataset integrity
+│   ├── create_colab_zip.py     # Package project for Colab training
+│   └── evaluate.py             # Benchmark harness → docs/benchmarks.md
 │
 ├── tests/                      # pytest suite
-│   ├── test_utils.py           # Gram matrix, normalize/denormalize
+│   ├── test_check_data.py      # Data scan counts, --min-valid exit codes
 │   ├── test_cin.py             # CIN module + interpolation
 │   ├── test_engine.py          # InferenceEngine integration
-│   ├── test_tiling.py          # 4K tiling + blending
 │   ├── test_models.py          # CIN model load + inference
-│   └── test_server.py          # FastAPI endpoints + validation
+│   ├── test_server.py          # FastAPI endpoints + validation
+│   ├── test_tiling.py          # 4K tiling + blending
+│   ├── test_train_cin.py       # Train/val split determinism
+│   ├── test_utils.py           # Gram matrix, normalize scaling
+│   └── test_vgg.py             # VGG feature layers (training regression)
 │
 ├── .github/workflows/          # CI/CD
 │   └── ci.yml                  # Lint + typecheck + pytest + frontend build
 │
-├── StyleForge.ipynb         # Colab training notebook
+├── StyleForge.ipynb            # Colab training notebook
 ├── pyproject.toml              # Tool config (ruff, mypy, packaging)
 ├── requirements.txt            # All dependencies (pinned)
 ├── README.md                   # Project overview + quick start
@@ -119,7 +126,6 @@ StyleForge/
 ┌─────────────────┐
 │  Postprocess    │
 │  - Clamp [0,255]│
-│  - Denormalize  │
 │  - ToPIL        │
 └────────┬────────┘
          │
@@ -174,11 +180,16 @@ epochs: 8
 batch-size: 4
 image-size: 256
 style-size: 512
+cuda: 1
+seed: 42
 content-weight: 1.0e5
 style-weight: 1.0e9
 lr: 1.0e-3
+log-interval: 500
+checkpoint-interval: 2000
 val-fraction: 0.02  # held out for validation
-amp: 1  # Enable fp16 autocast
+patience: 3         # early-stopping patience
+# amp: 1 is CLI-only (any default key is honored if added here)
 ```
 
 ### 2. Colab Training
@@ -256,28 +267,12 @@ python -m styleforge.train_cin cin \
     --cuda 1 --amp 1 --epochs 4
 ```
 
-### Step 4: Update Frontend
+### Step 4: Restart the Server — no frontend change needed
 
-Edit `frontend/src/App.tsx` to add the new style to the dropdown:
-
-```typescript
-const styleOptions = {
-  "Starry Night": 0,
-  "The Great Wave": 1,
-  // ...
-  "New Style Name": 5,
-};
-```
-
-### Step 5: Rebuild Frontend
-
-```bash
-cd frontend
-npm install
-npm run build
-```
-
-The FastAPI server will serve the updated build from `frontend/dist/`.
+The style list is served at runtime from `styles/catalog.yaml` via
+`/api/styles` and the React gallery renders it automatically, so no
+frontend edit or rebuild is required. Restart the FastAPI server to pick
+up the catalog change.
 
 ---
 
@@ -349,7 +344,8 @@ The server mounts `frontend/dist/` if it exists.
 **Fix:**
 - Reduce `--lr` (try 1e-4)
 - Adjust `--content-weight` and `--style-weight` ratio
-- Check `--limit` isn't too small (need at least 1000 images)
+- Check `--limit` isn't too small — the trainer errors clearly if
+  `drop_last` empties the training set (need more images than `--batch-size`)
 
 ---
 
@@ -357,9 +353,11 @@ The server mounts `frontend/dist/` if it exists.
 
 **Symptom:** Training crashes with NaN after enabling `--amp 1`
 
-**Cause:** fp16 overflow on large style weights
+**Cause:** fp16 instability in content loss or extreme weights; the style
+loss is computed in fp32 outside autocast by design
 
-**Fix:** Reduce `--style-weight` (try 1e9 instead of 1e10) or disable AMP
+**Fix:** Reduce `--style-weight` (try 1e9 instead of 1e10) or `--lr`, or
+disable AMP with `--amp 0`
 
 ---
 

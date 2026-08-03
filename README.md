@@ -140,7 +140,7 @@ pytest tests/ -v
 ruff check styleforge/ tests/ scripts/ server/
 ```
 
-All 37 tests should pass.
+All 41 tests should pass.
 
 ---
 
@@ -251,7 +251,10 @@ pytest tests/test_models.py -v
 - Training takes ~30-45 minutes on a T4 GPU
 - Loss should decrease from ~1e10 to ~1e8
 - Model size: ~6MB
-- Checkpoint saved to `models/multistyle.pth`
+- A validation split (default 2%) drives early stopping; checkpoints are
+  resumable with `--resume`
+- Best model saved to `models/multistyle.pth` (final-epoch weights saved as
+  `multistyle_last.pth`, loss plot as `cin_loss_plot.png`)
 
 ---
 
@@ -289,7 +292,7 @@ StyleForge/
 ├── styles/catalog.yaml     # Style roster + attribution
 ├── configs/default.yaml    # Training hyperparameters
 ├── scripts/                # Benchmark + data validation
-├── tests/                  # pytest suite (37 tests)
+├── tests/                  # pytest suite (41 tests)
 └── pyproject.toml          # Tool config
 ```
 
@@ -323,7 +326,10 @@ pytest tests/ -v
 
 ## Benchmarks
 
-Run `python scripts/evaluate.py` to regenerate `docs/benchmarks.md` with latency tables for your hardware.
+Run `python scripts/evaluate.py --cin-model models/multistyle.pth --num-styles 5`
+to regenerate `docs/benchmarks.md` with latency tables for your hardware.
+Add `--images-dir /path/to/heldout/images` for a content/style loss quality
+table.
 
 ---
 
